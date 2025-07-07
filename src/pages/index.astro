@@ -1,32 +1,30 @@
 ---
-import BaseHead from '../components/BaseHead.astro';
-import Footer from '../components/Footer.astro';
-import HeroSection from '../components/HeroSection.astro';
-import CoreSkillsSection from '../components/CoreSkillsSection.astro';
-import TechStackSection from '../components/TechStackSection.astro';
-import ProjectsSection from '../components/ProjectsSection.astro';
-import ContactSection from '../components/ContactSection.astro';
-import ProjectModal from '../components/ProjectModal.astro';
-import ScrollNavigation from '../components/ScrollNavigation.astro';
-import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
+import BaseHead from "../components/BaseHead.astro";
 
+import HeroSection from "../components/HeroSection.astro";
+import CoreSkillsSection from "../components/CoreSkillsSection.astro";
+import TechStackSection from "../components/TechStackSection.astro";
+import ProjectsSection from "../components/ProjectsSection.astro";
+import ContactSection from "../components/ContactSection.astro";
+import ProjectModal from "../components/ProjectModal.astro";
+import ScrollNavigation from "../components/ScrollNavigation.astro";
+import { SITE_TITLE, SITE_DESCRIPTION } from "../consts";
 ---
 
 <!doctype html>
 <html lang="ko">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<HeroSection />
-		<ScrollNavigation />
-		<CoreSkillsSection />
-		<TechStackSection />
-		<ProjectsSection />
-		<ContactSection />
-		<ProjectModal />
-		<Footer />
-		
-		<script src="../scripts/index.js"></script>
-	</body>
+  <head>
+    <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
+  </head>
+  <body>
+    <HeroSection />
+    <ScrollNavigation />
+    <CoreSkillsSection />
+    <TechStackSection />
+    <ProjectsSection />
+    <ContactSection />
+    <ProjectModal />
+
+    <script src="../scripts/index.js"></script>
+  </body>
 </html>

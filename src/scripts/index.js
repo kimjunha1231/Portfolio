@@ -306,6 +306,21 @@ function initModalFunctionality() {
       document.body.style.overflow = "hidden";
 
       modal.classList.add("show");
+
+      // 모달이 표시된 후 맨 위로 스크롤하고 포커스 설정
+      setTimeout(() => {
+        // 모달 컨테이너를 맨 위로 스크롤
+        const modalContent = modal.querySelector(".modal-content");
+        if (modalContent) {
+          modalContent.scrollTop = 0;
+          // 모달 컨테이너에 tabindex 추가 (포커스 가능하게 만들기)
+          modalContent.setAttribute("tabindex", "-1");
+          // 모달의 맨 위(모달 컨테이너)에 포커스
+          modalContent.focus();
+          modalContent.scrollIntoView({ behavior: "instant", block: "start" });
+        }
+      }, 100); // 딜레이를 조금 늘려서 안정성 확보
+
       console.log("모달 열림 완료");
     } else {
       console.error("모달 요소가 없습니다");
