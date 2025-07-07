@@ -1,80 +1,87 @@
 ---
-import { PROJECTS } from '../consts';
+import { PROJECTS } from "../consts";
 ---
 
 <section class="section section-alt" id="projects">
-	<div class="container">
-		<div class="section-header">
-			<h2 class="section-title">주요 프로젝트</h2>
-			<p>다양한 프로젝트를 통해 경험과 노하우를 쌓고 있습니다.</p>
-		</div>
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">프로젝트</h2>
+    </div>
 
-		<div class="card-grid">
-			{PROJECTS.map((project) => (
-				<div class="card project-card fade-in" data-project-id={project.id}>
-					<h3>{project.title}</h3>
-					<p>{project.description}</p>
-					<div class="tech-tags">
-						{project.technologies.map((tech) => (
-							<span class="tech-tag">{tech}</span>
-						))}
-					</div>
-					
-				</div>
-			))}
-		</div>
-		
-		<!-- <div class="text-center" style="margin-top: 3rem;">
+    <div class="card-grid">
+      {
+        PROJECTS.map((project) => (
+          <div class="card project-card fade-in" data-project-id={project.id}>
+            <h3>{project.title}</h3>
+            <p>{project.description}</p>
+            <div class="tech-tags">
+              {project.technologies.map((tech) => (
+                <span class="tech-tag">{tech}</span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <!-- <div class="text-center" style="margin-top: 3rem;">
 			<a href="/project" class="btn btn-primary">더 많은 프로젝트 보기</a>
 		</div> -->
-	</div>
+  </div>
 </section>
 
 <style>
-	.project-card {
-		cursor: pointer;
-		transition: all 0.3s ease;
-		position: relative;
-	}
+  .project-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
 
-	.project-card:hover {
-		transform: translateY(-5px);
-		box-shadow: 0 10px 30px rgba(96, 165, 250, 0.2);
-		border-color: var(--primary);
-	}
+  .project-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(96, 165, 250, 0.2);
+    border-color: var(--primary);
+  }
 
-	.project-card::before {
-		content: '';
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%);
-		opacity: 0;
-		transition: opacity 0.3s ease;
-		border-radius: inherit;
-	}
+  .project-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+      135deg,
+      rgba(96, 165, 250, 0.1) 0%,
+      rgba(59, 130, 246, 0.1) 100%
+    );
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border-radius: inherit;
+  }
 
-	.project-card:hover::before {
-		opacity: 1;
-	}
+  .project-card:hover::before {
+    opacity: 1;
+  }
 
-	.project-links {
-		display: flex;
-		gap: 1rem;
-		margin-top: 1rem;
-	}
+  .project-links {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
 
-	.project-link {
-		color: var(--primary);
-		text-decoration: none;
-		font-size: 0.9rem;
-		font-weight: 500;
-		transition: color 0.3s ease;
-	}
+  .project-link {
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.3s ease;
+  }
 
-	.project-link:hover {
-		color: var(--primary-dark);
-	}
-</style> 
+  .project-link:hover {
+    color: var(--primary-dark);
+  }
+</style>

@@ -1,158 +1,344 @@
 <div id="project-modal" class="modal">
-	<div class="modal-content">
-		<div class="modal-header">
-			<h2 id="modal-title"></h2>
-			<button class="modal-close" id="modal-close">&times;</button>
-		</div>
-		<div class="modal-body">
-			<div id="modal-description"></div>
-			<div class="modal-links">
-				<a id="modal-github" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
-					GitHub 보기
-				</a>
-				<a id="modal-demo" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline">
-					Live Demo
-				</a>
-			</div>
-		</div>
-	</div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <div class="modal-period">
+      <span id="modal-period-text">개발 기간: 2024.01 - 현재</span>
+    </div>
+    <div class="modal-body">
+      <div class="project-section">
+        <h3>역할</h3>
+        <div class="section-content">
+          <div id="modal-role">
+            <ul>
+              <li>개인 프로젝트로 기획부터 배포까지 모든 과정을 담당</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="project-section">
+        <h3>성과</h3>
+        <div class="section-content">
+          <div id="modal-achievements">
+            <ul>
+              <li>가족 정보 추출 및 검색 기능</li>
+              <li>Firebase의 Flutter로 사용하여 효율적인 MVP를 제작</li>
+              <li>2024년 졸업작품 아이디어 공모전 (1차/2차/3차 통과)</li>
+              <li>순천대학교 Pre 스타트업 선정, 창업 지원에서 개발 중</li>
+              <li>
+                프론트엔드 리드로 발발, 팀리더로서 상업화 및 사업화 조치 참여
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="project-section">
+        <h3>세부 내용</h3>
+        <div class="section-content">
+          <div id="modal-details">
+            <ul>
+              <li>React, TypeScript를 통한 체계적 개발</li>
+              <li>MSW ↔ Mock 서버 사용하여 API 연동 최적화</li>
+              <li>Jira 기반 Agile 방법론 협업 방식</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-links">
+        <a
+          id="modal-github"
+          href="javascript:void(0)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-primary"
+        >
+          GitHub 보기
+        </a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
-	.modal {
-		display: none;
-		position: fixed;
-		z-index: 1000;
-		left: 0;
-		top: 0;
-		width: 100%;
-		height: 100%;
-		background-color: rgba(0, 0, 0, 0.7);
-		backdrop-filter: blur(15px);
-		animation: fadeIn 0.3s ease-out;
-		justify-content: center;
-		align-items: center;
-	}
+  .modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(15px);
+    animation: fadeIn 0.3s ease-out;
+    justify-content: center;
+    align-items: center;
+  }
 
-	.modal.show {
-		display: flex;
-	}
+  .modal.show {
+    display: flex;
+  }
 
-	@keyframes fadeIn {
-		from { opacity: 0; }
-		to { opacity: 1; }
-	}
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 
-	.modal-content {
-		background: linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%);
-		margin: 0;
-		padding: 0;
-		border-radius: 1rem;
-		width: 90%;
-		max-width: 600px;
-		max-height: 80vh;
-		overflow-y: auto;
-		position: relative;
-		animation: slideIn 0.3s ease-out;
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 8px 24px rgba(0, 0, 0, 0.4);
-		backdrop-filter: blur(20px);
-	}
+  .modal-content {
+    background: linear-gradient(
+      135deg,
+      rgba(15, 23, 42, 0.98) 0%,
+      rgba(30, 41, 59, 0.98) 100%
+    );
+    margin: 0;
+    padding: 0;
+    border-radius: 1rem;
+    width: 90%;
+    max-width: 700px;
+    max-height: 85vh;
+    overflow-y: auto;
+    position: relative;
+    animation: slideIn 0.3s ease-out;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.6),
+      0 8px 24px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(20px);
+  }
 
-	@keyframes slideIn {
-		from { 
-			transform: translateY(-50px);
-			opacity: 0;
-		}
-		to { 
-			transform: translateY(0);
-			opacity: 1;
-		}
-	}
+  @keyframes slideIn {
+    from {
+      transform: translateY(-50px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
 
-	.modal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 2rem;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-		background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.8) 100%);
-		border-radius: 1rem 1rem 0 0;
-	}
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    background: linear-gradient(
+      135deg,
+      rgba(15, 23, 42, 0.8) 0%,
+      rgba(30, 41, 59, 0.8) 100%
+    );
+    border-radius: 1rem 1rem 0 0;
+  }
 
-	.modal-header h2 {
-		margin: 0;
-		color: white;
-		font-size: 1.5rem;
-		font-weight: 600;
-		text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-	}
+  .modal-header h2 {
+    margin: 0;
+    color: white;
+    font-size: 1.5rem;
+    font-weight: 600;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
 
-	.modal-close {
-		background: rgba(255, 255, 255, 0.1);
-		border: 1px solid rgba(255, 255, 255, 0.2);
-		font-size: 1.5rem;
-		cursor: pointer;
-		color: rgba(255, 255, 255, 0.8);
-		transition: all 0.3s ease;
-		padding: 0;
-		width: 40px;
-		height: 40px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 50%;
-		backdrop-filter: blur(10px);
-	}
+  .modal-close {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.8);
+    transition: all 0.3s ease;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    backdrop-filter: blur(10px);
+  }
 
-	.modal-close:hover {
-		color: white;
-		background-color: rgba(255, 255, 255, 0.2);
-		transform: scale(1.1);
-	}
+  .modal-close:hover {
+    color: white;
+    background-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+  }
 
-	.modal-body {
-		padding: 2rem;
-		color: rgba(255, 255, 255, 0.9);
-	}
+  .modal-period {
+    padding: 1rem 2rem;
+    text-align: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+  }
 
-	.modal-body p {
-		margin-bottom: 1rem;
-		line-height: 1.6;
-		color: rgba(255, 255, 255, 0.9);
-	}
+  .modal-period span {
+    color: #60a5fa;
+    font-size: 0.9rem;
+    font-weight: 500;
+    background: rgba(96, 165, 250, 0.1);
+    padding: 0.5rem 1rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
 
-	.modal-body ul {
-		margin-bottom: 1rem;
-		padding-left: 1.5rem;
-		color: rgba(255, 255, 255, 0.9);
-	}
+  .modal-body {
+    padding: 2rem;
+    color: rgba(255, 255, 255, 0.9);
+  }
 
-	.modal-body li {
-		margin-bottom: 0.5rem;
-		color: rgba(255, 255, 255, 0.9);
-	}
+  .project-section {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+  }
 
-	.modal-links {
-		display: flex;
-		gap: 1rem;
-		margin-top: 2rem;
-		flex-wrap: wrap;
-	}
+  .project-section:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+  }
 
-	@media (max-width: 768px) {
-		.modal-content {
-			width: 95%;
-			margin: 10% auto;
-		}
-		
-		.modal-header,
-		.modal-body {
-			padding: 1.5rem;
-		}
-		
-		.modal-links {
-			flex-direction: column;
-		}
-	}
-</style> 
+  .project-section h3 {
+    margin: 0 0 1.25rem 0;
+    color: #3b82f6;
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+
+  .section-content {
+    margin-left: 0;
+    padding-left: 1rem;
+  }
+
+  .section-content p {
+    margin-bottom: 1rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .section-content ul {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+    color: rgba(255, 255, 255, 0.9);
+    list-style-type: disc;
+  }
+
+  .section-content li {
+    margin-bottom: 0.75rem;
+    color: rgba(255, 255, 255, 0.9);
+    line-height: 1.5;
+    position: relative;
+  }
+
+  /* 중첩된 리스트 스타일 */
+  .section-content ul ul {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding-left: 1.8rem;
+    list-style-type: circle;
+  }
+
+  .section-content ul ul li {
+    margin-bottom: 0.5rem;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.95rem;
+  }
+
+  /* 3단계 중첩 리스트 스타일 */
+  .section-content ul ul ul {
+    margin-top: 0.4rem;
+    margin-bottom: 0.4rem;
+    padding-left: 2rem;
+    list-style-type: square;
+  }
+
+  .section-content ul ul ul li {
+    margin-bottom: 0.4rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+  }
+
+  /* 마커 색상 개선 */
+  .section-content ul li::marker {
+    color: rgba(96, 165, 250, 0.8);
+  }
+
+  .section-content ul ul li::marker {
+    color: rgba(96, 165, 250, 0.6);
+  }
+
+  .section-content ul ul ul li::marker {
+    color: rgba(96, 165, 250, 0.4);
+  }
+
+  .modal-links {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 120px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+    border: none;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+  }
+
+  @media (max-width: 768px) {
+    .modal-content {
+      width: 95%;
+      margin: 5% auto;
+      max-height: 90vh;
+    }
+
+    .modal-header,
+    .modal-body {
+      padding: 1.5rem;
+    }
+
+    .project-section {
+      padding: 1.25rem;
+    }
+
+    .section-content {
+      margin-left: 0;
+      margin-top: 1rem;
+    }
+
+    .modal-links {
+      flex-direction: column;
+    }
+
+    .btn {
+      width: 100%;
+    }
+  }
+</style>
