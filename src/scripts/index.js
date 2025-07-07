@@ -305,6 +305,9 @@ function initModalFunctionality() {
       // 외부 스크롤 비활성화
       document.body.style.overflow = "hidden";
 
+      // 모바일 뒤로가기 버튼을 위한 히스토리 엔트리 추가
+      history.pushState({ modalOpen: true }, "", window.location.href);
+
       modal.classList.add("show");
 
       // 모달이 표시된 후 맨 위로 스크롤하고 포커스 설정
@@ -399,6 +402,13 @@ function initModalFunctionality() {
   // ESC 키로 모달 닫기
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && modal && modal.classList.contains("show")) {
+      closeModal();
+    }
+  });
+
+  // 모바일 뒤로가기 버튼 처리
+  window.addEventListener("popstate", function (e) {
+    if (modal && modal.classList.contains("show")) {
       closeModal();
     }
   });
