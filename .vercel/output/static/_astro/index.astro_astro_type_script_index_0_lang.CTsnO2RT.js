@@ -1,4 +1,4 @@
-const g={1:{title:"Dearfam",period:"2024.11 ~ 현재",role:`
+const g={1:{title:"Dearfam : 가족의 이야기를 담아드립니다",period:"2024.11 ~ 현재",role:`
 			<ul>
 				<li>프론트엔드 리드 담당</li>
 				<li>기획, 디자인, 서류 작성 참여</li>
