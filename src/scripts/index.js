@@ -159,7 +159,7 @@ function initModalFunctionality() {
           modalTitle.textContent = project.title;
           modalDescription.innerHTML = project.description;
           modalGithub.href = project.github;
-          modalDemo.href = project.demo;
+          modalDemo.href = project.demo || "#";
 
           // 데모 링크가 없으면 숨기기
           if (!project.demo) {
@@ -168,7 +168,8 @@ function initModalFunctionality() {
             modalDemo.style.display = "inline-block";
           }
 
-          modal.style.display = "block";
+          modal.style.display = "flex";
+          modal.classList.add("show");
           document.body.style.overflow = "hidden";
         }
       }
@@ -179,6 +180,7 @@ function initModalFunctionality() {
   if (modalClose && modal) {
     modalClose.addEventListener("click", () => {
       modal.style.display = "none";
+      modal.classList.remove("show");
       document.body.style.overflow = "auto";
     });
   }
@@ -188,15 +190,40 @@ function initModalFunctionality() {
     modal.addEventListener("click", (e) => {
       if (e.target === modal) {
         modal.style.display = "none";
+        modal.classList.remove("show");
         document.body.style.overflow = "auto";
+      }
+    });
+  }
+
+  // 모달 내부 링크 클릭 시 이벤트 전파 방지
+  if (modalGithub) {
+    modalGithub.addEventListener("click", (e) => {
+      e.stopPropagation(); // 이벤트 전파 방지
+      // 링크가 유효한지 확인
+      if (modalGithub.href && modalGithub.href !== "#") {
+        // 새 창에서 링크 열기
+        window.open(modalGithub.href, "_blank", "noopener,noreferrer");
+      }
+    });
+  }
+
+  if (modalDemo) {
+    modalDemo.addEventListener("click", (e) => {
+      e.stopPropagation(); // 이벤트 전파 방지
+      // 링크가 유효한지 확인
+      if (modalDemo.href && modalDemo.href !== "#") {
+        // 새 창에서 링크 열기
+        window.open(modalDemo.href, "_blank", "noopener,noreferrer");
       }
     });
   }
 
   // ESC 키로 모달 닫기
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && modal && modal.style.display === "block") {
+    if (e.key === "Escape" && modal && modal.classList.contains("show")) {
       modal.style.display = "none";
+      modal.classList.remove("show");
       document.body.style.overflow = "auto";
     }
   });

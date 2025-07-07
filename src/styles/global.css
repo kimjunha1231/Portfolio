@@ -84,7 +84,7 @@ body {
 }
 
 .section {
-  padding: 5rem 0;
+  padding: 7rem 0;
 }
 
 .section-alt {
@@ -243,7 +243,7 @@ a:hover {
 
 .tech-tag {
   background: var(--color-background-alt);
-  color: var(--color-text);
+  color: white;
   padding: 0.25rem 0.75rem;
   border-radius: 1rem;
   font-size: 0.875rem;
@@ -268,7 +268,7 @@ a:hover {
   bottom: -0.5rem;
   left: 50%;
   transform: translateX(-50%);
-  width: 3rem;
+  width: 16rem;
   height: 3px;
   background: var(--gradient-primary);
   border-radius: 2px;

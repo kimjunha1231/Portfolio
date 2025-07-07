@@ -1,20 +1,10 @@
 <!-- Hero 하단 네비게이션 -->
-<nav class="hero-nav" id="hero-nav">
-	<div class="container">
-		<div class="nav-items">
-			<a href="#skills" class="nav-link">핵심 역량</a>
-			<a href="#tech" class="nav-link">기술 스택 및 도구</a>
-			<a href="#projects" class="nav-link">주요 프로젝트</a>
-			<a href="#contact" class="nav-link">연락하기</a>
-		</div>
-	</div>
-</nav>
+
 
 <!-- 스크롤 시 나타나는 고정 네비게이션 -->
 <nav class="fixed-nav" id="fixed-nav">
 	<div class="container">
 		<div class="nav-content">
-	
 			<div class="nav-items">
 				<a href="#skills" class="nav-link">핵심 역량</a>
 				<a href="#tech" class="nav-link">기술 스택</a>
@@ -26,69 +16,19 @@
 </nav>
 
 <style>
-	/* Hero 하단 네비게이션 */
-	.hero-nav {
-		background: rgba(15, 23, 42, 0.98);
-		backdrop-filter: blur(10px);
-		border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-		padding: 1.5rem 0;
-		transition: all 0.3s ease;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-	}
-
-	.hero-nav .nav-items {
-		display: flex;
-		justify-content: center;
-		gap: 3rem;
-	}
-
-	.hero-nav .nav-link {
-		color: rgba(255, 255, 255, 0.95);
-		text-decoration: none;
-		font-size: 1.1rem;
-		font-weight: 600;
-		padding: 0.5rem 1rem;
-		border-radius: 0.5rem;
-		transition: all 0.3s ease;
-		position: relative;
-		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-	}
-
-	.hero-nav .nav-link:hover {
-		color: #60a5fa;
-		background: rgba(96, 165, 250, 0.15);
-		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-		transform: translateY(-1px);
-	}
-
-	.hero-nav .nav-link::after {
-		content: '';
-		position: absolute;
-		bottom: -8px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 0;
-		height: 2px;
-		background: #60a5fa;
-		transition: width 0.3s ease;
-	}
-
-	.hero-nav .nav-link:hover::after {
-		width: 100%;
-	}
-
-	/* 고정 네비게이션 */
+	
 	.fixed-nav {
 		position: fixed;
-		top: 20px;
+		top: 10px;
 		left: 50%;
 		transform: translateX(-50%) translateY(-200%);
-		background: rgba(15, 23, 42, 0.95);
+		background: rgba(43, 67, 124, 0.5);
 		backdrop-filter: blur(12px);
 		border: 1px solid rgba(255, 255, 255, 0.2);
 		border-radius: 50px;
 		padding: 0.5rem 1rem;
 		z-index: 1000;
+		
 		transition: transform 0.3s ease;
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
 	}
@@ -119,21 +59,32 @@
 		white-space: nowrap;
 		position: relative;
 		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+		outline: none;
+		border: none;
 	}
 
 	.fixed-nav .nav-link:hover {
-		color: #60a5fa;
-		background: rgba(96, 165, 250, 0.15);
+		color: white;
+		background: black;
 		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 		transform: translateY(-1px);
+		outline: none;
+		border: none;
 	}
 
 	.fixed-nav .nav-link.active {
-		color: #60a5fa;
-		background: rgba(96, 165, 250, 0.2);
+		color: white;
+		background: black;
 		font-weight: 700;
 		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(96, 165, 250, 0.3);
 		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+		outline: none;
+		border: none;
+	}
+
+	.fixed-nav .nav-link:focus {
+		outline: none;
+		border: none;
 	}
 
 	/* 모바일 반응형 */
@@ -241,15 +192,18 @@
 	function handleScroll() {
 		const scrollY = window.scrollY;
 		
-		// 핵심 역량 섹션부터 고정 네비게이션 표시
-		const skillsSection = document.getElementById('skills');
-		let skillsSectionTop = 0;
+		// 뷰포트 높이의 80% 이상 스크롤했을 때 고정 네비게이션 표시
+		const viewportHeight = window.innerHeight;
+		const heroSection = document.querySelector('.hero') as HTMLElement;
+		let showThreshold = viewportHeight * 0.8;
 		
-		if (skillsSection) {
-			skillsSectionTop = skillsSection.offsetTop - 100; // 핵심 역량 섹션 시작점부터 나타남
+		// HeroSection이 있으면 그 높이의 70% 지점에서 나타나도록 조정
+		if (heroSection) {
+			const heroHeight = heroSection.offsetHeight;
+			showThreshold = heroHeight * 1.0;
 		}
 		
-		if (scrollY >= skillsSectionTop) {
+		if (scrollY >= showThreshold) {
 			fixedNav?.classList.add('visible');
 		} else {
 			fixedNav?.classList.remove('visible');

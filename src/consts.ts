@@ -16,17 +16,15 @@ export const PERSONAL_INFO = {
 
 // 기술 스택
 export const TECH_STACK = {
-  frontend: ["React", "TypeScript", "JavaScript", "Flutter", "HTML/CSS"],
+  frontend: ["React", "TypeScript", "JavaScript", "Flutter"],
   library: [
     "Tailwind CSS",
     "Styled Components",
     "Zustand",
     "Tanstack Query",
-    "React Hook Form",
-    "Zod",
     "MSW",
   ],
-  tools: ["GitHub", "Notion", "Obsidian", "Discord", "Linear", "Slack"],
+  tools: ["Riverpod", "Go_router", "DIO", "Retrofit", "shared_preferences"],
 };
 
 // 프로젝트 데이터
@@ -62,7 +60,7 @@ export const PROJECTS = [
       "Zod",
       "MSW",
     ],
-    link: "https://github.com/TEAM-POKID/Dearfam-Frontend",
+    link: "https://github.com/TEAM-POKIE/Dearfam-FrontEnd",
     demo: null,
   },
   {
@@ -95,7 +93,7 @@ export const PROJECTS = [
       "Retrofit",
       "shared_preferences",
     ],
-    link: "https://github.com/TEAM-POKID/Tito-Frontend",
+    link: "https://github.com/TEAM-POKIE/Tito-FrontEnd",
     demo: null,
   },
   {
@@ -127,7 +125,7 @@ export const PROJECTS = [
       "Zustand",
       "HTML/CSS",
     ],
-    link: "https://github.com/Here-You/Frontend",
+    link: "https://github.com/Here-You/FrontEnd",
     demo: null,
   },
   {
@@ -179,7 +177,7 @@ export const PROJECTS = [
       - 컴포넌트 기반 개발 패턴 학습</p>
     `,
     technologies: ["React", "Styled-components", "JavaScript", "HTML/CSS"],
-    link: "https://github.com/Convergence-Specialization/CS-Front",
+    link: "https://github.com/gdsc-ssu/poppet-app",
     demo: null,
   },
 ];
