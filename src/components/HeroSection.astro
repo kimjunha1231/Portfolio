@@ -1,0 +1,79 @@
+---
+import { PERSONAL_INFO } from '../consts';
+---
+
+<section class="section hero">
+	<div class="container">
+		<div class="hero-content">
+			<h1 class="text-center fade-in">
+				안녕하세요,<br />
+				<span class="text-gradient">프론트엔드 개발자</span><br />
+				<span>{PERSONAL_INFO.name}</span>입니다.
+			</h1>
+			<p class="text-center text-large fade-in">
+				현재 동기들과 개발팀을 이뤄 다양한 도전을 하고 있는
+				<br/>
+				{PERSONAL_INFO.description}
+			</p>
+			
+					<div class="hero-buttons fade-in">
+			<a href="/resume.pdf" download="김준하_이력서.pdf" class="btn btn-primary">이력서 다운로드</a>
+		
+		</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	.section.hero {
+		background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+		color: white;
+		min-height: 100vh;
+		display: flex;
+		align-items: center;
+		position: relative;
+		overflow: hidden;
+	}
+
+	.section.hero::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.2);
+	}
+
+	.hero-content {
+		position: relative;
+		z-index: 1;
+		text-align: center;
+		width: 100%;
+	}
+
+	.section.hero h1 {
+		color: white;
+		margin-bottom: 2rem;
+	}
+
+	.section.hero p {
+		color: rgba(255, 255, 255, 0.9);
+		max-width: 600px;
+		margin: 0 auto 3rem;
+	}
+
+	.hero-buttons {
+		display: flex;
+		gap: 1rem;
+		justify-content: center;
+		flex-wrap: wrap;
+	}
+
+	@media (max-width: 768px) {
+		.hero-buttons {
+			flex-direction: column;
+			align-items: center;
+		}
+	}
+</style> 

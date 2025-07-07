@@ -8,10 +8,10 @@ export const SITE_DESCRIPTION = "안녕하세요, 프론트엔드 개발자 김�
 export const PERSONAL_INFO = {
   name: "김준하",
   title: "프론트엔드 개발자",
-  email: "010-9383-9023",
+  email: "rlawnsgk0610@gmail.com",
   github: "https://github.com/kimjunha1231",
   description:
-    "안녕하세요. 함께 성장하는 개발자를 꿈꾸는 프론트엔드 엔지니어 김준하입니다.\n\n생년월일: 2001년 6월 10일\n학교/전공: 숭실대학교/전자 컴퓨터학부 4학년 2학기 재학\n관심분야: Front-End 개발",
+    "함께 성장하는 개발자를 꿈꾸는 프론트엔드 엔지니어 김준하입니다.",
 };
 
 // 기술 스택
@@ -132,6 +132,32 @@ export const PROJECTS = [
   },
   {
     id: 4,
+    title: "융합특성화 자유전공학부 커뮤니티 SSYUNG",
+    description: "융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.",
+    detailedDescription: `
+      <p><strong>개발 기간:</strong> 2021.01.03 - 2021.03.07</p>
+      <p><strong>프로젝트 개요:</strong><br>
+      융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.</p>
+      <p><strong>주요 기능:</strong></p>
+      <ul>
+        <li>총 6명 (프론트엔드 : 2명, 풀스택 : 2명, 백엔드 : 1명, 디자인 : 1명)</li>
+        <li>권한별 프론트엔드 개발 및 백엔드 연동</li>
+        <li>프론트엔드 UI/UX 모니터링 설정</li>
+        <li>초기 숭실대학교 선별 인증 시스템 적용</li>
+        <li>기획, 디자인, 개발까지 전반적인 협업</li>
+        <li>상태 관리 및 라우팅 설정</li>
+      </ul>
+      <p><strong>기술적 성과:</strong><br>
+      - 초기 개발 경험을 통한 협업 능력 향상<br>
+      - Git 컨벤션을 정하여 이슈 및 pull request 관리<br>
+      - 컴포넌트 기반 개발 패턴 학습</p>
+    `,
+    technologies: ["React", "Styled-components", "JavaScript", "HTML/CSS"],
+    link: "https://github.com/Convergence-Specialization/CS-Front",
+    demo: null,
+  },
+  {
+    id: 5,
     title: "융합특성화 자유전공학부 커뮤니티 SSYUNG",
     description: "융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.",
     detailedDescription: `

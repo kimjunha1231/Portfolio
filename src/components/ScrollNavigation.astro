@@ -1,0 +1,283 @@
+<!-- Hero 하단 네비게이션 -->
+<nav class="hero-nav" id="hero-nav">
+	<div class="container">
+		<div class="nav-items">
+			<a href="#skills" class="nav-link">핵심 역량</a>
+			<a href="#tech" class="nav-link">기술 스택 및 도구</a>
+			<a href="#projects" class="nav-link">주요 프로젝트</a>
+			<a href="#contact" class="nav-link">연락하기</a>
+		</div>
+	</div>
+</nav>
+
+<!-- 스크롤 시 나타나는 고정 네비게이션 -->
+<nav class="fixed-nav" id="fixed-nav">
+	<div class="container">
+		<div class="nav-content">
+	
+			<div class="nav-items">
+				<a href="#skills" class="nav-link">핵심 역량</a>
+				<a href="#tech" class="nav-link">기술 스택</a>
+				<a href="#projects" class="nav-link">프로젝트</a>
+				<a href="#contact" class="nav-link">연락</a>
+			</div>
+		</div>
+	</div>
+</nav>
+
+<style>
+	/* Hero 하단 네비게이션 */
+	.hero-nav {
+		background: rgba(15, 23, 42, 0.95);
+		backdrop-filter: blur(10px);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+		padding: 1.5rem 0;
+		transition: all 0.3s ease;
+	}
+
+	.hero-nav .nav-items {
+		display: flex;
+		justify-content: center;
+		gap: 3rem;
+	}
+
+	.hero-nav .nav-link {
+		color: rgba(255, 255, 255, 0.8);
+		text-decoration: none;
+		font-size: 1.1rem;
+		font-weight: 500;
+		padding: 0.5rem 1rem;
+		border-radius: 0.5rem;
+		transition: all 0.3s ease;
+		position: relative;
+	}
+
+	.hero-nav .nav-link:hover {
+		color: #60a5fa;
+		background: rgba(96, 165, 250, 0.1);
+	}
+
+	.hero-nav .nav-link::after {
+		content: '';
+		position: absolute;
+		bottom: -8px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 0;
+		height: 2px;
+		background: #60a5fa;
+		transition: width 0.3s ease;
+	}
+
+	.hero-nav .nav-link:hover::after {
+		width: 100%;
+	}
+
+	/* 고정 네비게이션 */
+	.fixed-nav {
+		position: fixed;
+		top: 20px;
+		left: 50%;
+		transform: translateX(-50%) translateY(-200%);
+		background: rgba(15, 23, 42, 0.95);
+		backdrop-filter: blur(12px);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		border-radius: 50px;
+		padding: 0.5rem 1rem;
+		z-index: 1000;
+		transition: transform 0.3s ease;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+	}
+
+	.fixed-nav.visible {
+		transform: translateX(-50%) translateY(0);
+	}
+
+	.fixed-nav .nav-content {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.fixed-nav .nav-items {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.fixed-nav .nav-link {
+		color: white;
+		text-decoration: none;
+		font-size: 0.85rem;
+		font-weight: 500;
+		padding: 0.6rem 1rem;
+		border-radius: 25px;
+		transition: all 0.3s ease;
+		white-space: nowrap;
+		position: relative;
+	}
+
+	.fixed-nav .nav-link:hover {
+		color: rgba(255, 255, 255, 0.8);
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	.fixed-nav .nav-link.active {
+		color: rgba(255, 255, 255, 0.95);
+		background: rgba(255, 255, 255, 0.15);
+		font-weight: 600;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	}
+
+	/* 모바일 반응형 */
+	@media (max-width: 768px) {
+		.hero-nav .nav-items {
+			flex-direction: column;
+			align-items: center;
+			gap: 1rem;
+		}
+
+		.hero-nav .nav-link {
+			font-size: 1rem;
+		}
+
+		.fixed-nav {
+			padding: 0.4rem 0.8rem;
+		}
+
+		.fixed-nav .nav-items {
+			gap: 0.3rem;
+		}
+
+		.fixed-nav .nav-link {
+			font-size: 0.75rem;
+			padding: 0.5rem 0.8rem;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.hero-nav .nav-items {
+			gap: 0.5rem;
+		}
+
+		.hero-nav .nav-link {
+			font-size: 0.9rem;
+			padding: 0.4rem 0.8rem;
+		}
+
+		.fixed-nav {
+			padding: 0.3rem 0.6rem;
+		}
+
+		.fixed-nav .nav-items {
+			gap: 0.2rem;
+		}
+
+		.fixed-nav .nav-link {
+			font-size: 0.7rem;
+			padding: 0.4rem 0.6rem;
+		}
+	}
+</style>
+
+<script>
+	// 스크롤 네비게이션 기능
+	const heroNav = document.getElementById('hero-nav');
+	const fixedNav = document.getElementById('fixed-nav');
+	
+	let heroNavBottom = 0;
+	let currentSection = '';
+	
+	// 섹션들
+	const sections = ['skills', 'tech', 'projects', 'contact'];
+	
+	function updateNavPosition() {
+		if (heroNav) {
+			heroNavBottom = heroNav.offsetTop + heroNav.offsetHeight;
+		}
+	}
+	
+	// 현재 활성화된 섹션 업데이트
+	function updateActiveSection() {
+		const scrollY = window.scrollY;
+		let current = '';
+		
+		sections.forEach(sectionId => {
+			const section = document.getElementById(sectionId);
+			if (section) {
+				const sectionTop = section.offsetTop - 150;
+				const sectionBottom = sectionTop + section.offsetHeight;
+				
+				if (scrollY >= sectionTop && scrollY < sectionBottom) {
+					current = sectionId;
+				}
+			}
+		});
+		
+		if (current !== currentSection) {
+			currentSection = current;
+			
+			// 모든 nav-link에서 active 클래스 제거
+			document.querySelectorAll('.nav-link').forEach(link => {
+				link.classList.remove('active');
+			});
+			
+			// 현재 섹션에 해당하는 링크에 active 클래스 추가
+			if (current) {
+				document.querySelectorAll(`a[href="#${current}"]`).forEach(link => {
+					link.classList.add('active');
+				});
+			}
+		}
+	}
+	
+	function handleScroll() {
+		const scrollY = window.scrollY;
+		
+		// 핵심 역량 섹션부터 고정 네비게이션 표시
+		const skillsSection = document.getElementById('skills');
+		let skillsSectionTop = 0;
+		
+		if (skillsSection) {
+			skillsSectionTop = skillsSection.offsetTop - 100; // 핵심 역량 섹션 시작점부터 나타남
+		}
+		
+		if (scrollY >= skillsSectionTop) {
+			fixedNav?.classList.add('visible');
+		} else {
+			fixedNav?.classList.remove('visible');
+		}
+		
+		updateActiveSection();
+	}
+	
+	// 초기 위치 설정
+	updateNavPosition();
+	updateActiveSection();
+	
+	// 스크롤 이벤트 리스너
+	window.addEventListener('scroll', handleScroll);
+	
+	// 리사이즈 시 위치 업데이트
+	window.addEventListener('resize', () => {
+		updateNavPosition();
+		handleScroll();
+	});
+	
+	// 네비게이션 클릭 시 부드러운 스크롤
+	document.querySelectorAll('.nav-link').forEach(link => {
+		link.addEventListener('click', (e) => {
+			e.preventDefault();
+			const href = link.getAttribute('href');
+			if (href && href.startsWith('#')) {
+				const target = document.querySelector(href);
+				if (target && target instanceof HTMLElement) {
+					const offsetTop = target.offsetTop - 100; // 고정 네비게이션 높이 고려
+					window.scrollTo({
+						top: offsetTop,
+						behavior: 'smooth'
+					});
+				}
+			}
+		});
+	});
+</script> 
