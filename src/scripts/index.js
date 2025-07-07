@@ -1,7 +1,7 @@
 // 프로젝트 데이터를 consts.ts의 PROJECTS와 일치시킴
 const projectsData = {
   1: {
-    title: "Dearfam : 가족의 이야기를 담아드립니다",
+    title: "Dearfam",
     period: "2024.11 ~ 현재",
     role: `
 			<ul>
