@@ -28,11 +28,12 @@
 <style>
 	/* Hero 하단 네비게이션 */
 	.hero-nav {
-		background: rgba(15, 23, 42, 0.95);
+		background: rgba(15, 23, 42, 0.98);
 		backdrop-filter: blur(10px);
-		border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 		padding: 1.5rem 0;
 		transition: all 0.3s ease;
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 	}
 
 	.hero-nav .nav-items {
@@ -42,19 +43,22 @@
 	}
 
 	.hero-nav .nav-link {
-		color: rgba(255, 255, 255, 0.8);
+		color: rgba(255, 255, 255, 0.95);
 		text-decoration: none;
 		font-size: 1.1rem;
-		font-weight: 500;
+		font-weight: 600;
 		padding: 0.5rem 1rem;
 		border-radius: 0.5rem;
 		transition: all 0.3s ease;
 		position: relative;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 	}
 
 	.hero-nav .nav-link:hover {
 		color: #60a5fa;
-		background: rgba(96, 165, 250, 0.1);
+		background: rgba(96, 165, 250, 0.15);
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+		transform: translateY(-1px);
 	}
 
 	.hero-nav .nav-link::after {
@@ -108,24 +112,28 @@
 		color: white;
 		text-decoration: none;
 		font-size: 0.85rem;
-		font-weight: 500;
+		font-weight: 600;
 		padding: 0.6rem 1rem;
 		border-radius: 25px;
 		transition: all 0.3s ease;
 		white-space: nowrap;
 		position: relative;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 	}
 
 	.fixed-nav .nav-link:hover {
-		color: rgba(255, 255, 255, 0.8);
-		background: rgba(255, 255, 255, 0.1);
+		color: #60a5fa;
+		background: rgba(96, 165, 250, 0.15);
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+		transform: translateY(-1px);
 	}
 
 	.fixed-nav .nav-link.active {
-		color: rgba(255, 255, 255, 0.95);
-		background: rgba(255, 255, 255, 0.15);
-		font-weight: 600;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+		color: #60a5fa;
+		background: rgba(96, 165, 250, 0.2);
+		font-weight: 700;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(96, 165, 250, 0.3);
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 	}
 
 	/* 모바일 반응형 */
