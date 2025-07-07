@@ -19,7 +19,7 @@ const projectsData = {
 			- MSW ↔ Mock 서버 사용하여 API 연동 최적화<br>
 			- Jira 기반 Agile 방법론 협업 방식</p>
 		`,
-    github: "https://github.com/TEAM-POKID/Dearfam-Frontend",
+    github: "https://github.com/TEAM-POKIE/Dearfam-Frontend",
     demo: null,
   },
   2: {
@@ -41,7 +41,7 @@ const projectsData = {
 			- Firebase Realtime Database를 이용하여 실시간 데이터 관리<br>
 			- WebSocket을 활용한 실시간 메시지 시스템</p>
 		`,
-    github: "https://github.com/TEAM-POKID/Tito-Frontend",
+    github: "https://github.com/TEAM-POKIE/Tito-Frontend",
     demo: null,
   },
   3: {

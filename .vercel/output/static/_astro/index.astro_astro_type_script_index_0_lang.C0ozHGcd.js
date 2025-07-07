@@ -14,7 +14,7 @@ const c={1:{title:"Dearfam : 가족의 이야기를 담아드립니다",descript
 			- React, TypeScript를 통한 체계적 개발<br>
 			- MSW ↔ Mock 서버 사용하여 API 연동 최적화<br>
 			- Jira 기반 Agile 방법론 협업 방식</p>
-		`,github:"https://github.com/TEAM-POKID/Dearfam-Frontend",demo:null},2:{title:"TITO 토픽 보조 서비스",description:`
+		`,github:"https://github.com/TEAM-POKIE/Dearfam-Frontend",demo:null},2:{title:"TITO 토픽 보조 서비스",description:`
 			<p><strong>개발 기간:</strong> 2024.03 - 2024.12</p>
 			<p><strong>프로젝트 개요:</strong><br>
 			LLM RAG 기술을 활용한 토픽 보조 서비스입니다. 메인테이너로 참여했습니다.</p>
@@ -30,7 +30,7 @@ const c={1:{title:"Dearfam : 가족의 이야기를 담아드립니다",descript
 			- 패키지별 모듈 접근을 통한 최적화, 추후 출시 대응을 위한 아키텍처 구현<br>
 			- Firebase Realtime Database를 이용하여 실시간 데이터 관리<br>
 			- WebSocket을 활용한 실시간 메시지 시스템</p>
-		`,github:"https://github.com/TEAM-POKID/Tito-Frontend",demo:null},3:{title:"여행의 이유",description:`
+		`,github:"https://github.com/TEAM-POKIE/Tito-Frontend",demo:null},3:{title:"여행의 이유",description:`
 			<p><strong>개발 기간:</strong> 2024.01.10 - 2024.02.19</p>
 			<p><strong>프로젝트 개요:</strong><br>
 			자신만의 여행상식이 나열되며 추천 링크를 즐겨보는 커뮤니티 사이트입니다.</p>
