@@ -2,48 +2,640 @@
 import BaseHead from '../components/BaseHead.astro';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
+import { SITE_TITLE, SITE_DESCRIPTION, PERSONAL_INFO, TECH_STACK, PROJECTS } from '../consts';
+
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 	<head>
 		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
 	</head>
 	<body>
 		<Header />
-		<main>
-			<h1>🧑‍🚀 Hello, Astronaut!</h1>
-			<p>
-				Welcome to the official <a href="https://astro.build/">Astro</a> blog starter template. This
-				template serves as a lightweight, minimally-styled starting point for anyone looking to build
-				a personal website, blog, or portfolio with Astro.
-			</p>
-			<p>
-				This template comes with a few integrations already configured in your
-				<code>astro.config.mjs</code> file. You can customize your setup with
-				<a href="https://astro.build/integrations">Astro Integrations</a> to add tools like Tailwind,
-				React, or Vue to your project.
-			</p>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-			<p>
-				Have fun! If you get stuck, remember to
-				<a href="https://docs.astro.build/">read the docs</a>
-				or <a href="https://astro.build/chat">join us on Discord</a> to ask questions.
-			</p>
-			<p>
-				Looking for a blog template with a bit more personality? Check out
-				<a href="https://github.com/Charca/astro-blog-template">astro-blog-template</a>
-				by <a href="https://twitter.com/Charca">Maxi Ferreira</a>.
-			</p>
-		</main>
+		
+		<!-- 히어로 섹션 -->
+		<section class="section hero">
+			<div class="container">
+				<div class="hero-content">
+					
+					<h1 class="text-center fade-in">
+						안녕하세요,<br />
+						<span class="text-gradient">프론트엔드 개발자</span><br />
+						<em>{PERSONAL_INFO.name}</em>입니다.
+					</h1>
+					<p class="text-center text-large fade-in">
+						{PERSONAL_INFO.description}
+					</p>
+					<div class="hero-buttons fade-in">
+						<a href="/resume" class="btn btn-primary">이력서 보기</a>
+						<a href="#contact" class="btn btn-outline">연락하기</a>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- 핵심 역량 섹션 -->
+		<section class="section section-alt">
+			<div class="container">
+				<div class="section-header">
+					<h2 class="section-title">핵심 역량</h2>
+					<p>유연하게 소통하고 견고하게 개발합니다.</p>
+				</div>
+				
+				<div class="card-grid">
+					<div class="card fade-in">
+						<h3>모던 프론트엔드 개발</h3>
+						<p>React.js를 이용한 프론트엔드 개발경험이 있으며, JavaScript(ES6), TypeScript에 능숙합니다. Next.js와 더불어 핵심적인 React 라이브러리 활용 경험이 있습니다.</p>
+					</div>
+					<div class="card fade-in">
+						<h3>웹사이트 개선 및 최적화</h3>
+						<p>웹사이트를 개발하고 유지보수하면서, 웹사이트의 성능을 측정하고 개선했습니다. 또한, 검색엔진 최적화 작업을 통해 사용자 경험을 향상시킨 경험이 있습니다.</p>
+					</div>
+					<div class="card fade-in">
+						<h3>커뮤니케이션 및 협업</h3>
+						<p>GitHub을 이용한 협업 경험이 있으며, 다양한 협업 도구 사용 경험이 있습니다. 기획, 디자인 등 다양한 직군과 원활한 커뮤니케이션이 가능합니다.</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- 기술 스택 섹션 -->
+		<section class="section">
+			<div class="container">
+				<div class="section-header">
+					<h2 class="section-title">기술 스택 및 도구</h2>
+					<p>아래의 기술을 사용할 수 있습니다.</p>
+				</div>
+
+				<div class="tech-categories">
+					<div class="tech-category fade-in">
+						<h3>프론트엔드</h3>
+						<div class="tech-tags">
+							{TECH_STACK.frontend.map((tech) => (
+								<span class="tech-tag">{tech}</span>
+							))}
+						</div>
+					</div>
+					
+					<div class="tech-category fade-in">
+						<h3>웹 라이브러리</h3>
+						<div class="tech-tags">
+							{TECH_STACK.library.map((tech) => (
+								<span class="tech-tag">{tech}</span>
+							))}
+						</div>
+					</div>
+					
+					<div class="tech-category fade-in">
+						<h3>플러터 라이브러리</h3>
+						<div class="tech-tags">
+							{TECH_STACK.tools.map((tech) => (
+								<span class="tech-tag">{tech}</span>
+							))}
+						</div>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- 프로젝트 섹션 -->
+		<section class="section section-alt">
+			<div class="container">
+				<div class="section-header">
+					<h2 class="section-title">주요 프로젝트</h2>
+					<p>다양한 프로젝트를 통해 경험과 노하우를 쌓고 있습니다.</p>
+				</div>
+
+				<div class="card-grid">
+					{PROJECTS.map((project) => (
+						<div class="card project-card fade-in" data-project-id={project.id}>
+							<h3>{project.title}</h3>
+							<p>{project.description}</p>
+							<div class="tech-tags">
+								{project.technologies.map((tech) => (
+									<span class="tech-tag">{tech}</span>
+								))}
+							</div>
+							<div class="project-links">
+								<a href={project.link} target="_blank" rel="noopener noreferrer" class="project-link">
+									GitHub
+								</a>
+								{project.demo && (
+									<a href={project.demo} target="_blank" rel="noopener noreferrer" class="project-link">
+										Live Demo
+									</a>
+								)}
+							</div>
+						</div>
+					))}
+				</div>
+				
+				<div class="text-center" style="margin-top: 3rem;">
+					<a href="/project" class="btn btn-primary">더 많은 프로젝트 보기</a>
+				</div>
+			</div>
+		</section>
+
+		<!-- 연락처 섹션 -->
+		<section class="section" id="contact">
+			<div class="container">
+				<div class="section-header">
+					<h2 class="section-title">연락하기</h2>
+					<p>더 궁금한 점이 있다면 편하게 연락주세요</p>
+				</div>
+
+				<div class="contact-info">
+					<div class="contact-item fade-in">
+						<h3>전화번호</h3>
+						<p><a href="tel:{PERSONAL_INFO.email}">{PERSONAL_INFO.email}</a></p>
+					</div>
+					
+					<div class="contact-item fade-in">
+						<h3>GitHub</h3>
+						<p><a href={PERSONAL_INFO.github} target="_blank" rel="noopener noreferrer">GitHub 프로필 보기</a></p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- 프로젝트 모달 -->
+		<div id="project-modal" class="modal">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2 id="modal-title"></h2>
+					<button class="modal-close" id="modal-close">&times;</button>
+				</div>
+				<div class="modal-body">
+					<div id="modal-description"></div>
+					<div class="modal-links">
+						<a id="modal-github" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+							GitHub 보기
+						</a>
+						<a id="modal-demo" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline">
+							Live Demo
+						</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<Footer />
+
+		<script>
+			// 프로젝트 데이터 (JavaScript에서 사용)
+			const projectsData = {
+				1: {
+					title: "Dearfam : 가족의 이야기를 담아드립니다",
+					description: `
+						<p><strong>개발 기간:</strong> 2024.01 - 현재</p>
+						<p><strong>프로젝트 개요:</strong><br>
+						AI 및 LLM 기술을 활용하여 가족의 추억을 디지털 및 실물 콘텐츠로 제작하는 서비스입니다.</p>
+						<p><strong>주요 기능:</strong></p>
+						<ul>
+							<li>가족 정보 추출 및 검색 기능</li>
+							<li>Firebase의 Flutter을 사용하여 콘텐츠를 위한 MVP를 제작</li>
+							<li>2024년 졸업작품 아이디어 공모전 (1차/2차/3차 통과)</li>
+							<li>승천대학교 Pre 스타트업 선정, 창업 사업화에서 개발 중</li>
+							<li>프론트엔드 리드로 발탁, 팀리더로서 상업화 및 신사업 조기 참여</li>
+						</ul>
+						<p><strong>기술적 성과:</strong><br>
+						- React, TypeScript를 통한 체계적 개발<br>
+						- MSW ↔ Mock 서버 사용하여 API 연동 최적화<br>
+						- Jira 기반 Agile 방법론 협업 방식</p>
+					`,
+					github: "https://github.com/TEAM-POKID/Dearfam-Frontend",
+					demo: null
+				},
+				2: {
+					title: "TITO 토픽 보조 서비스",
+					description: `
+						<p><strong>개발 기간:</strong> 2024.03 - 2024.12</p>
+						<p><strong>프로젝트 개요:</strong><br>
+						LLM RAG 기술을 활용한 토픽 보조 서비스입니다. 메인테이너로 참여했습니다.</p>
+						<p><strong>주요 기능:</strong></p>
+						<ul>
+							<li>총 5명 (백엔드 : 2명, 프론트엔드 : 2명, AI : 1명)</li>
+							<li>프론트엔드 개발 리드로 맡아 초기개발 및 진행서버 호스팅 서비스 관리</li>
+							<li>2024년 ICT토픽 프론트엔드 토큰 진행 (아이디어 발표/취업정보/실습 지원)</li>
+							<li>Linear의 Discord, Obsidian을 활용하여 Agile 방법론 적용</li>
+							<li>DIO, Retrofit, shared_preferences를 이용하여 REST API 연동 및 상태 관리</li>
+						</ul>
+						<p><strong>기술적 성과:</strong><br>
+						- 패키지별 모듈 접근을 통한 최적화, 추후 출시 대응을 위한 아키텍처 구현<br>
+						- Firebase Realtime Database를 이용하여 실시간 데이터 관리<br>
+						- WebSocket을 활용한 실시간 메시지 시스템</p>
+					`,
+					github: "https://github.com/TEAM-POKID/Tito-Frontend",
+					demo: null
+				},
+				3: {
+					title: "여행의 이유",
+					description: `
+						<p><strong>개발 기간:</strong> 2024.01.10 - 2024.02.19</p>
+						<p><strong>프로젝트 개요:</strong><br>
+						자신만의 여행상식이 나열되며 추천 링크를 즐겨보는 커뮤니티 사이트입니다.</p>
+						<p><strong>주요 기능:</strong></p>
+						<ul>
+							<li>총 11명 (프론트엔드 : 5명, 백엔드 : 4명, 기획 : 1명, 디자인 : 1명)</li>
+							<li>다양한 직군과의 협업을 통한 종합적인 웹사이트 개발</li>
+							<li>프론트엔드에서 로그인 및 마이페이지 개발</li>
+							<li>소셜 로그인 (구글, 카카오, 네이버) 개발</li>
+							<li>MSW(Mock Service Worker) 사용</li>
+						</ul>
+						<p><strong>기술적 성과:</strong><br>
+						- 컴포넌트 기반 아키텍처로 재사용성 향상<br>
+						- Git message convention, 팀 내 컨벤션을 정하여 이슈 및 pull request 관리<br>
+						- Git flow를 통한 체계적 버전 관리</p>
+					`,
+					github: "https://github.com/Here-You/Frontend",
+					demo: null
+				},
+				4: {
+					title: "융합특성화 자유전공학부 커뮤니티 SSYUNG",
+					description: `
+						<p><strong>개발 기간:</strong> 2021.01.03 - 2021.03.07</p>
+						<p><strong>프로젝트 개요:</strong><br>
+						융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.</p>
+						<p><strong>주요 기능:</strong></p>
+						<ul>
+							<li>총 6명 (프론트엔드 : 2명, 풀스택 : 2명, 백엔드 : 1명, 디자인 : 1명)</li>
+							<li>권한별 프론트엔드 개발 및 백엔드 연동</li>
+							<li>프론트엔드 UI/UX 모니터링 설정</li>
+							<li>초기 숭실대학교 선별 인증 시스템 적용</li>
+							<li>기획, 디자인, 개발까지 전반적인 협업</li>
+							<li>상태 관리 및 라우팅 설정</li>
+						</ul>
+						<p><strong>기술적 성과:</strong><br>
+						- 초기 개발 경험을 통한 협업 능력 향상<br>
+						- Git 컨벤션을 정하여 이슈 및 pull request 관리<br>
+						- 컴포넌트 기반 개발 패턴 학습</p>
+					`,
+					github: "https://github.com/Convergence-Specialization/CS-Front",
+					demo: null
+				}
+			};
+
+			// 스크롤 애니메이션
+			const observerOptions = {
+				threshold: 0.1,
+				rootMargin: '0px 0px -50px 0px'
+			};
+
+			const observer = new IntersectionObserver((entries) => {
+				entries.forEach(entry => {
+					if (entry.isIntersecting) {
+						entry.target.classList.add('visible');
+					}
+				});
+			}, observerOptions);
+
+			// 애니메이션 요소들을 관찰
+			const animatedElements = document.querySelectorAll('.fade-in, .slide-in-left, .slide-in-right');
+			animatedElements.forEach(el => observer.observe(el));
+
+			// 네비게이션 스크롤
+			document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+				anchor.addEventListener('click', (e: Event) => {
+					e.preventDefault();
+					const href = (anchor as HTMLAnchorElement).getAttribute('href');
+					if (href) {
+						const target = document.querySelector(href);
+						if (target) {
+							target.scrollIntoView({
+								behavior: 'smooth',
+								block: 'start'
+							});
+						}
+					}
+				});
+			});
+
+			// 모달 기능
+			const modal = document.getElementById('project-modal') as HTMLElement;
+			const modalTitle = document.getElementById('modal-title') as HTMLElement;
+			const modalDescription = document.getElementById('modal-description') as HTMLElement;
+			const modalGithub = document.getElementById('modal-github') as HTMLAnchorElement;
+			const modalDemo = document.getElementById('modal-demo') as HTMLAnchorElement;
+			const modalClose = document.getElementById('modal-close') as HTMLElement;
+
+			// 프로젝트 카드 클릭 이벤트
+			document.querySelectorAll('.project-card').forEach(card => {
+				card.addEventListener('click', (e: Event) => {
+					e.preventDefault();
+					const projectId = (card as HTMLElement).dataset.projectId;
+					if (projectId && (projectsData as any)[projectId]) {
+						const project = (projectsData as any)[projectId];
+						
+						if (modalTitle && modalDescription && modalGithub && modalDemo && modal) {
+							modalTitle.textContent = project.title;
+							modalDescription.innerHTML = project.description;
+							modalGithub.href = project.github;
+							modalDemo.href = project.demo;
+							
+							// 데모 링크가 없으면 숨기기
+							if (!project.demo) {
+								modalDemo.style.display = 'none';
+							} else {
+								modalDemo.style.display = 'inline-block';
+							}
+							
+							modal.style.display = 'block';
+							document.body.style.overflow = 'hidden';
+						}
+					}
+				});
+			});
+
+			// 모달 닫기
+			if (modalClose && modal) {
+				modalClose.addEventListener('click', () => {
+					modal.style.display = 'none';
+					document.body.style.overflow = 'auto';
+				});
+			}
+
+			// 모달 배경 클릭 시 닫기
+			if (modal) {
+				modal.addEventListener('click', (e: Event) => {
+					if (e.target === modal) {
+						modal.style.display = 'none';
+						document.body.style.overflow = 'auto';
+					}
+				});
+			}
+
+			// ESC 키로 모달 닫기
+			document.addEventListener('keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Escape' && modal && modal.style.display === 'block') {
+					modal.style.display = 'none';
+					document.body.style.overflow = 'auto';
+				}
+			});
+		</script>
+
+		<style>
+			.section.hero {
+				background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+				color: white;
+				min-height: 100vh;
+				display: flex;
+				align-items: center;
+				position: relative;
+				overflow: hidden;
+			}
+
+			.section.hero::before {
+				content: '';
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				bottom: 0;
+				background: rgba(0, 0, 0, 0.2);
+			}
+
+			.hero-content {
+				position: relative;
+				z-index: 1;
+				text-align: center;
+				width: 100%;
+			}
+
+			.section.hero h1 {
+				color: white;
+				margin-bottom: 2rem;
+			}
+
+			.section.hero p {
+				color: rgba(255, 255, 255, 0.9);
+				max-width: 600px;
+				margin: 0 auto 3rem;
+			}
+
+			.hero-buttons {
+				display: flex;
+				gap: 1rem;
+				justify-content: center;
+				flex-wrap: wrap;
+			}
+
+			.tech-categories {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+				gap: 3rem;
+				margin-top: 3rem;
+			}
+
+			.tech-category {
+				text-align: center;
+			}
+
+			/* 프로젝트 카드 호버 효과 */
+			.project-card {
+				cursor: pointer;
+				transition: all 0.3s ease;
+				position: relative;
+			}
+
+			.project-card:hover {
+				transform: translateY(-5px);
+				box-shadow: 0 10px 30px rgba(96, 165, 250, 0.2);
+				border-color: var(--primary);
+			}
+
+			.project-card::before {
+				content: '';
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				bottom: 0;
+				background: linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%);
+				opacity: 0;
+				transition: opacity 0.3s ease;
+				border-radius: inherit;
+			}
+
+			.project-card:hover::before {
+				opacity: 1;
+			}
+
+			.project-links {
+				display: flex;
+				gap: 1rem;
+				margin-top: 1rem;
+			}
+
+			.project-link {
+				color: var(--primary);
+				text-decoration: none;
+				font-size: 0.9rem;
+				font-weight: 500;
+				transition: color 0.3s ease;
+			}
+
+			.project-link:hover {
+				color: var(--primary-dark);
+			}
+
+			/* 모달 스타일 */
+			.modal {
+				display: none;
+				position: fixed;
+				z-index: 1000;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+				background-color: rgba(0, 0, 0, 0.5);
+				backdrop-filter: blur(10px);
+				animation: fadeIn 0.3s ease-out;
+			}
+
+			@keyframes fadeIn {
+				from { opacity: 0; }
+				to { opacity: 1; }
+			}
+
+			.modal-content {
+				background-color: var(--card-bg);
+				margin: 5% auto;
+				padding: 0;
+				border-radius: 1rem;
+				width: 90%;
+				max-width: 600px;
+				max-height: 80vh;
+				overflow-y: auto;
+				position: relative;
+				animation: slideIn 0.3s ease-out;
+				border: 1px solid var(--border);
+			}
+
+			@keyframes slideIn {
+				from { 
+					transform: translateY(-50px);
+					opacity: 0;
+				}
+				to { 
+					transform: translateY(0);
+					opacity: 1;
+				}
+			}
+
+			.modal-header {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 2rem;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.modal-header h2 {
+				margin: 0;
+				color: var(--text);
+				font-size: 1.5rem;
+			}
+
+			.modal-close {
+				background: none;
+				border: none;
+				font-size: 2rem;
+				cursor: pointer;
+				color: var(--text-secondary);
+				transition: color 0.3s ease;
+				padding: 0;
+				width: 40px;
+				height: 40px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 50%;
+			}
+
+			.modal-close:hover {
+				color: var(--text);
+				background-color: var(--bg-secondary);
+			}
+
+			.modal-body {
+				padding: 2rem;
+			}
+
+			.modal-body p {
+				margin-bottom: 1rem;
+				line-height: 1.6;
+			}
+
+			.modal-body ul {
+				margin-bottom: 1rem;
+				padding-left: 1.5rem;
+			}
+
+			.modal-body li {
+				margin-bottom: 0.5rem;
+			}
+
+			.modal-links {
+				display: flex;
+				gap: 1rem;
+				margin-top: 2rem;
+				flex-wrap: wrap;
+			}
+
+			@media (max-width: 768px) {
+				.modal-content {
+					width: 95%;
+					margin: 10% auto;
+				}
+				
+				.modal-header,
+				.modal-body {
+					padding: 1.5rem;
+				}
+				
+				.modal-links {
+					flex-direction: column;
+				}
+			}
+
+			.tech-category h3 {
+				margin-bottom: 1.5rem;
+				color: var(--color-primary);
+			}
+
+			.contact-info {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+				gap: 3rem;
+				margin-top: 3rem;
+			}
+
+			.contact-item {
+				text-align: center;
+				padding: 2rem;
+				background: var(--color-background-alt);
+				border: 1px solid var(--color-border);
+				border-radius: 1rem;
+				box-shadow: var(--shadow-md);
+			}
+
+			.contact-item h3 {
+				margin-bottom: 1rem;
+				color: var(--color-primary);
+			}
+
+			@media (max-width: 768px) {
+				.hero-buttons {
+					flex-direction: column;
+					align-items: center;
+				}
+				
+				.tech-categories {
+					grid-template-columns: 1fr;
+					gap: 2rem;
+				}
+			}
+		</style>
 	</body>
 </html>
