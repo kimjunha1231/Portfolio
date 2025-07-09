@@ -78,7 +78,7 @@ const projectsData = {
            <li style="margin-left: 2rem;">이런 점을 고려하여 riverPod를 이용해 미리 Rest API정보를 받아와 저장해서 사용하거나 실시간으로 받아온 WebSocket 정보를 riverPod에 저장하여 데이터를 교체하는 식의 방법으로 해결</li>
           </ul>
         </li>
-        <li>새로운 게시물로 업데이트 할 떄 polling 방식으로 처리하면 사용자가 몰렸을 때 과부하가 발생할 수 있다 판단하여 새로고침 버튼으로 변경</li>
+        <li>새로운 게시물로 업데이트 할 때 polling 방식으로 처리하면 사용자가 몰렸을 때 과부하가 발생할 수 있다 판단하여 새로고침 버튼으로 변경</li>
 				<li>소셜 로그인(카카오, 애플, 구글), 실시간 채팅, 게시글, Splash 페이지, 온보딩 페이지, 토론 등 대부분 페이지 제작</li>
 				<li>Flutter hook 채택
         <ul>
