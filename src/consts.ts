@@ -50,7 +50,7 @@ export const PROJECTS = [
   {
     id: 2,
     title: "TITO 토론 보조 서비스",
-    description: "LLM RAG 기술을 활용한 토픽 보조 서비스입니다.",
+    description: "LLM RAG 기술을 활용한 토론 보조 서비스입니다.",
 
     technologies: [
       "Flutter",
