@@ -1,25 +1,458 @@
-<!DOCTYPE html><html lang="ko"> <head><!-- Global Metadata --><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="sitemap" href="/sitemap-index.xml"><link rel="alternate" type="application/rss+xml" title="김준하 Portfolio" href="https://example.com/rss.xml"><meta name="generator" content="Astro v5.11.0"><!-- Font preloads --><link rel="preload" href="/fonts/atkinson-regular.woff" as="font" type="font/woff" crossorigin><link rel="preload" href="/fonts/atkinson-bold.woff" as="font" type="font/woff" crossorigin><!-- Canonical URL --><link rel="canonical" href="https://example.com/"><!-- Primary Meta Tags --><title>김준하 Portfolio</title><meta name="title" content="김준하 Portfolio"><meta name="description" content="안녕하세요, 프론트엔드 개발자 김준하입니다."><!-- Open Graph / Facebook --><meta property="og:type" content="website"><meta property="og:url" content="https://example.com/"><meta property="og:title" content="김준하 Portfolio"><meta property="og:description" content="안녕하세요, 프론트엔드 개발자 김준하입니다."><meta property="og:image" content="https://example.com/_astro/blog-placeholder-1.Bx0Zcyzv.jpg"><!-- Twitter --><meta property="twitter:card" content="summary_large_image"><meta property="twitter:url" content="https://example.com/"><meta property="twitter:title" content="김준하 Portfolio"><meta property="twitter:description" content="안녕하세요, 프론트엔드 개발자 김준하입니다."><meta property="twitter:image" content="https://example.com/_astro/blog-placeholder-1.Bx0Zcyzv.jpg"><link rel="stylesheet" href="/_astro/index.B3p_3H4c.css"></head> <body> <section class="section hero" data-astro-cid-nlow4r3u> <div class="container" data-astro-cid-nlow4r3u> <div class="hero-content" data-astro-cid-nlow4r3u> <h1 class="text-center fade-in" data-astro-cid-nlow4r3u>
-안녕하세요,<br data-astro-cid-nlow4r3u> <span class="text-gradient" data-astro-cid-nlow4r3u>프론트엔드 개발자</span><br data-astro-cid-nlow4r3u> <span data-astro-cid-nlow4r3u>김준하</span>입니다.
-</h1> <p class="text-center text-large fade-in" data-astro-cid-nlow4r3u>
-현재 동기들과 개발팀을 이뤄 다양한 도전을 하고 있는
-<br data-astro-cid-nlow4r3u> 함께 성장하는 개발자를 꿈꾸는 프론트엔드 엔지니어 김준하입니다. </p> <div class="hero-buttons fade-in" data-astro-cid-nlow4r3u> <a href="/resume.pdf" download="김준하_이력서.pdf" class="btn btn-primary" data-astro-cid-nlow4r3u>이력서 다운로드</a> </div> </div> </div> </section>  <!-- Hero 하단 네비게이션 --><!-- 스크롤 시 나타나는 고정 네비게이션 --><nav class="fixed-nav" id="fixed-nav" data-astro-cid-o7l3ajso> <div class="container" data-astro-cid-o7l3ajso> <div class="nav-content" data-astro-cid-o7l3ajso> <div class="nav-items" data-astro-cid-o7l3ajso> <a href="#skills" class="nav-link" data-astro-cid-o7l3ajso>핵심 역량</a> <a href="#tech" class="nav-link" data-astro-cid-o7l3ajso>기술 스택</a> <a href="#projects" class="nav-link" data-astro-cid-o7l3ajso>프로젝트</a> <a href="#contact" class="nav-link" data-astro-cid-o7l3ajso>연락처</a> </div> </div> </div> </nav>  <script type="module">const l=document.getElementById("hero-nav"),r=document.getElementById("fixed-nav");let f="";const d=["skills","tech","projects","contact"];function a(){l&&l.offsetTop+l.offsetHeight}function h(){const o=window.scrollY,c=document.documentElement.scrollHeight,n=window.innerHeight;let e="";o+n>=c-50?e="contact":d.forEach((t,m)=>{const i=document.getElementById(t);if(i){const s=i.offsetTop-150,v=s+i.offsetHeight;m===d.length-1?o>=s&&(e=t):o>=s&&o<v&&(e=t)}}),e!==f&&(f=e,document.querySelectorAll(".nav-link").forEach(t=>{t.classList.remove("active")}),e&&document.querySelectorAll(`a[href="#${e}"]`).forEach(t=>{t.classList.add("active")}))}function u(){const o=window.scrollY,c=window.innerHeight,n=document.querySelector(".hero");let e=c*.8;n&&(e=n.offsetHeight*1),o>=e?r?.classList.add("visible"):r?.classList.remove("visible"),h()}a();h();window.addEventListener("scroll",u);window.addEventListener("resize",()=>{a(),u()});document.querySelectorAll(".nav-link").forEach(o=>{o.addEventListener("click",c=>{c.preventDefault();const n=o.getAttribute("href");if(n&&n.startsWith("#")){const e=document.querySelector(n);if(e&&e instanceof HTMLElement){const t=e.offsetTop-100;window.scrollTo({top:t,behavior:"smooth"})}}})});</script> <section class="section section-alt" id="skills"> <div class="container"> <div class="section-header"> <h2 class="section-title">핵심 역량</h2> </div> <div class="card-grid"> <div class="card fade-in"> <h3>사용자를 위한 기획, 디자인, 개발을 추구</h3> <p>
-동기들과 개발팀을 이뤄 기획부터 디자인, 배포까지의 전 과정을 팀원들과
-          함께 하고 있습니다. 사용자를 고려한 기획 및 개발을 목표로 하며 그
-          결과로 공모전 수상 및 Pre스타트업 선정을 이뤘습니다.
-</p> </div> <div class="card fade-in"> <h3>새로운 기술에 대한 열정과 끊임없는 학습</h3> <p>
-Flutter를 처음 사용할 때도 5일간 50시간의 강의를 듣고 바로 개발을
-          시작하였고, 현재 Flutter에서 다시 웹 프론트엔드 개발로 관심사가 바뀌어
-          현직자와 프론트엔드 번들링 과정, zod, TypeScript, 네트워크 등 본질적인
-          개념을 위한 스터디를 진행하고 있습니다.
-</p> </div> <div class="card fade-in"> <h3>커뮤니케이션 및 협업</h3> <p>
-개발 팀에서 linear, discord, notion, obsidian 등의 협업 툴을 사용해
-          Agile 방법론을 진행하였고, 1년이 넘는 현재까지 매주 회의를 통해
-          커뮤니케이션에 집중하고 있습니다.
-</p> </div> </div> </div> </section> <section class="section" id="tech" data-astro-cid-qdufpkoj> <div class="container" data-astro-cid-qdufpkoj> <div class="section-header" data-astro-cid-qdufpkoj> <h2 class="section-title" data-astro-cid-qdufpkoj>기술 스택</h2> </div> <div class="tech-categories" data-astro-cid-qdufpkoj> <div class="tech-category fade-in" data-astro-cid-qdufpkoj> <h3 data-astro-cid-qdufpkoj>프론트엔드</h3> <div class="tech-tags" data-astro-cid-qdufpkoj> <span class="tech-tag" data-astro-cid-qdufpkoj>React</span><span class="tech-tag" data-astro-cid-qdufpkoj>TypeScript</span><span class="tech-tag" data-astro-cid-qdufpkoj>JavaScript</span><span class="tech-tag" data-astro-cid-qdufpkoj>Flutter</span> </div> </div> <div class="tech-category fade-in" data-astro-cid-qdufpkoj> <h3 data-astro-cid-qdufpkoj>웹 라이브러리</h3> <div class="tech-tags" data-astro-cid-qdufpkoj> <span class="tech-tag" data-astro-cid-qdufpkoj>Tailwind CSS</span><span class="tech-tag" data-astro-cid-qdufpkoj>Styled Components</span><span class="tech-tag" data-astro-cid-qdufpkoj>Zustand</span><span class="tech-tag" data-astro-cid-qdufpkoj>Tanstack Query</span><span class="tech-tag" data-astro-cid-qdufpkoj>MSW</span> </div> </div> <div class="tech-category fade-in" data-astro-cid-qdufpkoj> <h3 data-astro-cid-qdufpkoj>플러터 라이브러리</h3> <div class="tech-tags" data-astro-cid-qdufpkoj> <span class="tech-tag" data-astro-cid-qdufpkoj>Riverpod</span><span class="tech-tag" data-astro-cid-qdufpkoj>Go_router</span> </div> </div> </div> </div> </section>  <section class="section section-alt" id="projects" data-astro-cid-oyo7lhtz> <div class="container" data-astro-cid-oyo7lhtz> <div class="section-header" data-astro-cid-oyo7lhtz> <h2 class="section-title" data-astro-cid-oyo7lhtz>프로젝트</h2> </div> <div class="card-grid" data-astro-cid-oyo7lhtz> <div class="card project-card fade-in" data-project-id="1" data-astro-cid-oyo7lhtz> <h3 data-astro-cid-oyo7lhtz>Dearfam : 가족의 이야기를 담아드립니다</h3> <p data-astro-cid-oyo7lhtz>AI 및 LLM 기술을 활용하여 가족의 추억을 디지털 및 실물 콘텐츠로 제작하는 서비스입니다.</p> <div class="tech-tags" data-astro-cid-oyo7lhtz> <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span><span class="tech-tag" data-astro-cid-oyo7lhtz>TypeScript</span><span class="tech-tag" data-astro-cid-oyo7lhtz>TailwindCSS</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Zustand</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Tanstack Query</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Zod</span><span class="tech-tag" data-astro-cid-oyo7lhtz>MSW</span> </div> </div><div class="card project-card fade-in" data-project-id="2" data-astro-cid-oyo7lhtz> <h3 data-astro-cid-oyo7lhtz>TITO 토론 보조 서비스</h3> <p data-astro-cid-oyo7lhtz>LLM RAG 기술을 활용한 토론 보조 서비스입니다.</p> <div class="tech-tags" data-astro-cid-oyo7lhtz> <span class="tech-tag" data-astro-cid-oyo7lhtz>Flutter</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Riverpod</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Go_router</span><span class="tech-tag" data-astro-cid-oyo7lhtz>DIO</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Retrofit</span><span class="tech-tag" data-astro-cid-oyo7lhtz>shared_preferences</span> </div> </div><div class="card project-card fade-in" data-project-id="3" data-astro-cid-oyo7lhtz> <h3 data-astro-cid-oyo7lhtz>여행의 이유</h3> <p data-astro-cid-oyo7lhtz>자신만의 여행방식이나 여행 코스, 추천 장소를 공유하는 커뮤니티 사이트입니다</p> <div class="tech-tags" data-astro-cid-oyo7lhtz> <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Styled-components</span><span class="tech-tag" data-astro-cid-oyo7lhtz>JavaScript</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Zustand</span><span class="tech-tag" data-astro-cid-oyo7lhtz>MSW</span> </div> </div><div class="card project-card fade-in" data-project-id="4" data-astro-cid-oyo7lhtz> <h3 data-astro-cid-oyo7lhtz>융합특성화 자유전공학부 커뮤니티 SSYUNG</h3> <p data-astro-cid-oyo7lhtz>융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.</p> <div class="tech-tags" data-astro-cid-oyo7lhtz> <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Styled-components</span><span class="tech-tag" data-astro-cid-oyo7lhtz>JavaScript</span> </div> </div><div class="card project-card fade-in" data-project-id="5" data-astro-cid-oyo7lhtz> <h3 data-astro-cid-oyo7lhtz>POPPET </h3> <p data-astro-cid-oyo7lhtz>노약자를 위한 AI 말동무 서비스입니다</p> <div class="tech-tags" data-astro-cid-oyo7lhtz> <span class="tech-tag" data-astro-cid-oyo7lhtz>Flutter</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Riverpod</span><span class="tech-tag" data-astro-cid-oyo7lhtz>Go_router</span> </div> </div> </div> <!-- <div class="text-center" style="margin-top: 3rem;">
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <!-- Global Metadata -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="김준하 Portfolio"
+      href="https://example.com/rss.xml"
+    />
+    <meta name="generator" content="Astro v5.11.0" />
+    <!-- Font preloads -->
+    <link
+      rel="preload"
+      href="/fonts/atkinson-regular.woff"
+      as="font"
+      type="font/woff"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/atkinson-bold.woff"
+      as="font"
+      type="font/woff"
+      crossorigin
+    />
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://example.com/" />
+    <!-- Primary Meta Tags -->
+    <title>김준하 Portfolio</title>
+    <meta name="title" content="김준하 Portfolio" />
+    <meta
+      name="description"
+      content="안녕하세요, 프론트엔드 개발자 김준하입니다."
+    />
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://example.com/" />
+    <meta property="og:title" content="김준하 Portfolio" />
+    <meta
+      property="og:description"
+      content="안녕하세요, 프론트엔드 개발자 김준하입니다."
+    />
+    <meta
+      property="og:image"
+      content="https://example.com/_astro/blog-placeholder-1.Bx0Zcyzv.jpg"
+    />
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://example.com/" />
+    <meta property="twitter:title" content="김준하 Portfolio" />
+    <meta
+      property="twitter:description"
+      content="안녕하세요, 프론트엔드 개발자 김준하입니다."
+    />
+    <meta
+      property="twitter:image"
+      content="https://example.com/_astro/blog-placeholder-1.Bx0Zcyzv.jpg"
+    />
+    <link rel="stylesheet" href="/_astro/index.B3p_3H4c.css" />
+  </head>
+  <body>
+    <section class="section hero" data-astro-cid-nlow4r3u>
+      <div class="container" data-astro-cid-nlow4r3u>
+        <div class="hero-content" data-astro-cid-nlow4r3u>
+          <h1 class="text-center fade-in" data-astro-cid-nlow4r3u>
+            안녕하세요,<br data-astro-cid-nlow4r3u />
+            <span class="text-gradient" data-astro-cid-nlow4r3u
+              >프론트엔드 개발자</span
+            ><br data-astro-cid-nlow4r3u />
+            <span data-astro-cid-nlow4r3u>김준하</span>입니다.
+          </h1>
+          <p class="text-center text-large fade-in" data-astro-cid-nlow4r3u>
+            현재 동기들과 개발팀을 이뤄 다양한 도전을 하고 있는
+            <br data-astro-cid-nlow4r3u />
+            함께 성장하는 개발자를 꿈꾸는 프론트엔드 엔지니어 김준하입니다.
+          </p>
+          <div class="hero-buttons fade-in" data-astro-cid-nlow4r3u>
+            <a
+              href="/resume.pdf"
+              download="김준하_이력서.pdf"
+              class="btn btn-primary"
+              data-astro-cid-nlow4r3u
+              >이력서 다운로드</a
+            >
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- Hero 하단 네비게이션 --><!-- 스크롤 시 나타나는 고정 네비게이션 -->
+    <nav class="fixed-nav" id="fixed-nav" data-astro-cid-o7l3ajso>
+      <div class="container" data-astro-cid-o7l3ajso>
+        <div class="nav-content" data-astro-cid-o7l3ajso>
+          <div class="nav-items" data-astro-cid-o7l3ajso>
+            <a href="#skills" class="nav-link" data-astro-cid-o7l3ajso
+              >핵심 역량</a
+            >
+            <a href="#tech" class="nav-link" data-astro-cid-o7l3ajso
+              >기술 스택</a
+            >
+            <a href="#projects" class="nav-link" data-astro-cid-o7l3ajso
+              >프로젝트</a
+            >
+            <a href="#contact" class="nav-link" data-astro-cid-o7l3ajso
+              >연락처</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+    <script type="module">
+      const s = document.getElementById("hero-nav"),
+        i = document.getElementById("fixed-nav");
+      let r = "";
+      const h = ["skills", "tech", "projects", "contact"];
+      function l() {
+        s && s.offsetTop + s.offsetHeight;
+      }
+      function f() {
+        const n = window.scrollY;
+        let o = "";
+        h.forEach((e) => {
+          const t = document.getElementById(e);
+          if (t) {
+            const c = t.offsetTop - 150,
+              d = c + t.offsetHeight;
+            n >= c && n < d && (o = e);
+          }
+        }),
+          o !== r &&
+            ((r = o),
+            document.querySelectorAll(".nav-link").forEach((e) => {
+              e.classList.remove("active");
+            }),
+            o &&
+              document.querySelectorAll(`a[href="#${o}"]`).forEach((e) => {
+                e.classList.add("active");
+              }));
+      }
+      function a() {
+        const n = window.scrollY,
+          o = window.innerHeight,
+          e = document.querySelector(".hero");
+        let t = o * 0.8;
+        e && (t = e.offsetHeight * 1),
+          n >= t ? i?.classList.add("visible") : i?.classList.remove("visible"),
+          f();
+      }
+      l();
+      f();
+      window.addEventListener("scroll", a);
+      window.addEventListener("resize", () => {
+        l(), a();
+      });
+      document.querySelectorAll(".nav-link").forEach((n) => {
+        n.addEventListener("click", (o) => {
+          o.preventDefault();
+          const e = n.getAttribute("href");
+          if (e && e.startsWith("#")) {
+            const t = document.querySelector(e);
+            if (t && t instanceof HTMLElement) {
+              const c = t.offsetTop - 100;
+              window.scrollTo({ top: c, behavior: "smooth" });
+            }
+          }
+        });
+      });
+    </script>
+    <section class="section section-alt" id="skills">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">핵심 역량</h2>
+        </div>
+        <div class="card-grid">
+          <div class="card fade-in">
+            <h3>사용자를 위한 기획, 디자인, 개발을 추구</h3>
+            <p>
+              동기들과 개발팀을 이뤄 기획부터 디자인, 배포까지의 전 과정을
+              팀원들과 함께 하고 있습니다. 사용자를 고려한 기획 및 개발을 목표로
+              하며 그 결과로 공모전 수상 및 Pre스타트업 선정을 이뤘습니다.
+            </p>
+          </div>
+          <div class="card fade-in">
+            <h3>새로운 기술에 대한 열정과 끊임없는 학습</h3>
+            <p>
+              Flutter를 처음 사용할 때도 5일간 50시간의 강의를 듣고 바로 개발을
+              시작하였고, 현재 Flutter에서 다시 웹 프론트엔드 개발로 관심사가
+              바뀌어 현직자와 프론트엔드 번들링 과정, zod, TypeScript, 네트워크
+              등 본질적인 개념을 위한 스터디를 진행하고 있습니다.
+            </p>
+          </div>
+          <div class="card fade-in">
+            <h3>커뮤니케이션 및 협업</h3>
+            <p>
+              개발 팀에서 linear, discord, notion, obsidian 등의 협업 툴을
+              사용해 Agile 방법론을 진행하였고, 1년이 넘는 현재까지 매주 회의를
+              통해 커뮤니케이션에 집중하고 있습니다.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="section" id="tech" data-astro-cid-qdufpkoj>
+      <div class="container" data-astro-cid-qdufpkoj>
+        <div class="section-header" data-astro-cid-qdufpkoj>
+          <h2 class="section-title" data-astro-cid-qdufpkoj>기술 스택</h2>
+        </div>
+        <div class="tech-categories" data-astro-cid-qdufpkoj>
+          <div class="tech-category fade-in" data-astro-cid-qdufpkoj>
+            <h3 data-astro-cid-qdufpkoj>프론트엔드</h3>
+            <div class="tech-tags" data-astro-cid-qdufpkoj>
+              <span class="tech-tag" data-astro-cid-qdufpkoj>React</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>TypeScript</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>JavaScript</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>Flutter</span>
+            </div>
+          </div>
+          <div class="tech-category fade-in" data-astro-cid-qdufpkoj>
+            <h3 data-astro-cid-qdufpkoj>웹 라이브러리</h3>
+            <div class="tech-tags" data-astro-cid-qdufpkoj>
+              <span class="tech-tag" data-astro-cid-qdufpkoj>Tailwind CSS</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj
+                >Styled Components</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>Zustand</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj
+                >Tanstack Query</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>MSW</span>
+            </div>
+          </div>
+          <div class="tech-category fade-in" data-astro-cid-qdufpkoj>
+            <h3 data-astro-cid-qdufpkoj>플러터 라이브러리</h3>
+            <div class="tech-tags" data-astro-cid-qdufpkoj>
+              <span class="tech-tag" data-astro-cid-qdufpkoj>Riverpod</span
+              ><span class="tech-tag" data-astro-cid-qdufpkoj>Go_router</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="section section-alt" id="projects" data-astro-cid-oyo7lhtz>
+      <div class="container" data-astro-cid-oyo7lhtz>
+        <div class="section-header" data-astro-cid-oyo7lhtz>
+          <h2 class="section-title" data-astro-cid-oyo7lhtz>프로젝트</h2>
+        </div>
+        <div class="card-grid" data-astro-cid-oyo7lhtz>
+          <div
+            class="card project-card fade-in"
+            data-project-id="1"
+            data-astro-cid-oyo7lhtz
+          >
+            <h3 data-astro-cid-oyo7lhtz>
+              Dearfam : 가족의 이야기를 담아드립니다
+            </h3>
+            <p data-astro-cid-oyo7lhtz>
+              AI 및 LLM 기술을 활용하여 가족의 추억을 디지털 및 실물 콘텐츠로
+              제작하는 서비스입니다.
+            </p>
+            <div class="tech-tags" data-astro-cid-oyo7lhtz>
+              <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>TypeScript</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>TailwindCSS</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Zustand</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz
+                >Tanstack Query</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Zod</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>MSW</span>
+            </div>
+          </div>
+          <div
+            class="card project-card fade-in"
+            data-project-id="2"
+            data-astro-cid-oyo7lhtz
+          >
+            <h3 data-astro-cid-oyo7lhtz>TITO 토론 보조 서비스</h3>
+            <p data-astro-cid-oyo7lhtz>
+              LLM RAG 기술을 활용한 토론 보조 서비스입니다.
+            </p>
+            <div class="tech-tags" data-astro-cid-oyo7lhtz>
+              <span class="tech-tag" data-astro-cid-oyo7lhtz>Flutter</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Riverpod</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Go_router</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>DIO</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Retrofit</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz
+                >shared_preferences</span
+              >
+            </div>
+          </div>
+          <div
+            class="card project-card fade-in"
+            data-project-id="3"
+            data-astro-cid-oyo7lhtz
+          >
+            <h3 data-astro-cid-oyo7lhtz>여행의 이유</h3>
+            <p data-astro-cid-oyo7lhtz>
+              자신만의 여행방식이나 여행 코스, 추천 장소를 공유하는 커뮤니티
+              사이트입니다
+            </p>
+            <div class="tech-tags" data-astro-cid-oyo7lhtz>
+              <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz
+                >Styled-components</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>JavaScript</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Zustand</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>MSW</span>
+            </div>
+          </div>
+          <div
+            class="card project-card fade-in"
+            data-project-id="4"
+            data-astro-cid-oyo7lhtz
+          >
+            <h3 data-astro-cid-oyo7lhtz>
+              융합특성화 자유전공학부 커뮤니티 SSYUNG
+            </h3>
+            <p data-astro-cid-oyo7lhtz>
+              융합특성화 자유전공학부를 위한 커뮤니티 사이트입니다.
+            </p>
+            <div class="tech-tags" data-astro-cid-oyo7lhtz>
+              <span class="tech-tag" data-astro-cid-oyo7lhtz>React</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz
+                >Styled-components</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>JavaScript</span>
+            </div>
+          </div>
+          <div
+            class="card project-card fade-in"
+            data-project-id="5"
+            data-astro-cid-oyo7lhtz
+          >
+            <h3 data-astro-cid-oyo7lhtz>POPPET</h3>
+            <p data-astro-cid-oyo7lhtz>노약자를 위한 AI 말동무 서비스입니다</p>
+            <div class="tech-tags" data-astro-cid-oyo7lhtz>
+              <span class="tech-tag" data-astro-cid-oyo7lhtz>Flutter</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Riverpod</span
+              ><span class="tech-tag" data-astro-cid-oyo7lhtz>Go_router</span>
+            </div>
+          </div>
+        </div>
+        <!-- <div class="text-center" style="margin-top: 3rem;">
 			<a href="/project" class="btn btn-primary">더 많은 프로젝트 보기</a>
-		</div> --> </div> </section>  <section class="section" id="contact" data-astro-cid-jjagjrbk> <div class="container" data-astro-cid-jjagjrbk> <div class="section-header" data-astro-cid-jjagjrbk> <h2 class="section-title" data-astro-cid-jjagjrbk>연락처</h2> <p data-astro-cid-jjagjrbk>더 궁금한 점이 있다면 편하게 연락주세요</p> </div> <div class="contact-item fade-in" data-astro-cid-jjagjrbk> <p data-astro-cid-jjagjrbk>이메일: rlawnsgk0610@gmail.com</p> <p data-astro-cid-jjagjrbk>연락처: 010-9383-9023</p> <p data-astro-cid-jjagjrbk>
-GitHub: <a href="https://github.com/kimjunha1231" target="_blank" rel="noopener noreferrer" data-astro-cid-jjagjrbk>kimjunha1231</a> </p> </div> </div> </section>  <div id="project-modal" class="modal" data-astro-cid-r575xpuf> <div class="modal-content" data-astro-cid-r575xpuf> <div class="modal-header" data-astro-cid-r575xpuf> <h2 id="modal-title" data-astro-cid-r575xpuf></h2> <button class="modal-close" id="modal-close" data-astro-cid-r575xpuf>&times;</button> </div> <div class="modal-period" data-astro-cid-r575xpuf> <span id="modal-period-text" data-astro-cid-r575xpuf>개발 기간: 2024.01 - 현재</span> </div> <div class="modal-body" data-astro-cid-r575xpuf> <div class="project-section" data-astro-cid-r575xpuf> <h3 data-astro-cid-r575xpuf>역할</h3> <div class="section-content" data-astro-cid-r575xpuf> <div id="modal-role" data-astro-cid-r575xpuf> <ul data-astro-cid-r575xpuf> <li data-astro-cid-r575xpuf>개인 프로젝트로 기획부터 배포까지 모든 과정을 담당</li> </ul> </div> </div> </div> <div class="project-section" data-astro-cid-r575xpuf> <h3 data-astro-cid-r575xpuf>성과</h3> <div class="section-content" data-astro-cid-r575xpuf> <div id="modal-achievements" data-astro-cid-r575xpuf> <ul data-astro-cid-r575xpuf> <li data-astro-cid-r575xpuf>가족 정보 추출 및 검색 기능</li> <li data-astro-cid-r575xpuf>Firebase의 Flutter로 사용하여 효율적인 MVP를 제작</li> <li data-astro-cid-r575xpuf>2024년 졸업작품 아이디어 공모전 (1차/2차/3차 통과)</li> <li data-astro-cid-r575xpuf>순천대학교 Pre 스타트업 선정, 창업 지원에서 개발 중</li> <li data-astro-cid-r575xpuf>
-프론트엔드 리드로 발발, 팀리더로서 상업화 및 사업화 조치 참여
-</li> </ul> </div> </div> </div> <div class="project-section" data-astro-cid-r575xpuf> <h3 data-astro-cid-r575xpuf>세부 내용</h3> <div class="section-content" data-astro-cid-r575xpuf> <div id="modal-details" data-astro-cid-r575xpuf> <ul data-astro-cid-r575xpuf> <li data-astro-cid-r575xpuf>React, TypeScript를 통한 체계적 개발</li> <li data-astro-cid-r575xpuf>MSW ↔ Mock 서버 사용하여 API 연동 최적화</li> <li data-astro-cid-r575xpuf>Jira 기반 Agile 방법론 협업 방식</li> </ul> </div> </div> </div> <div class="modal-links" data-astro-cid-r575xpuf> <a id="modal-github" href="javascript:void(0)" target="_blank" rel="noopener noreferrer" class="btn btn-primary" data-astro-cid-r575xpuf>
-GitHub 보기
-</a> </div> </div> </div> </div>  <script type="module" src="/_astro/index.astro_astro_type_script_index_0_lang.BqX1ZFWQ.js"></script> </body> </html>
+		</div> -->
+      </div>
+    </section>
+    <section class="section" id="contact" data-astro-cid-jjagjrbk>
+      <div class="container" data-astro-cid-jjagjrbk>
+        <div class="section-header" data-astro-cid-jjagjrbk>
+          <h2 class="section-title" data-astro-cid-jjagjrbk>연락처</h2>
+          <p data-astro-cid-jjagjrbk>더 궁금한 점이 있다면 편하게 연락주세요</p>
+        </div>
+        <div class="contact-item fade-in" data-astro-cid-jjagjrbk>
+          <p data-astro-cid-jjagjrbk>이메일: rlawnsgk0610@gmail.com</p>
+          <p data-astro-cid-jjagjrbk>연락처: 010-9383-9023</p>
+          <p data-astro-cid-jjagjrbk>
+            GitHub:
+            <a
+              href="https://github.com/kimjunha1231"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-astro-cid-jjagjrbk
+              >kimjunha1231</a
+            >
+          </p>
+        </div>
+      </div>
+    </section>
+    <div id="project-modal" class="modal" data-astro-cid-r575xpuf>
+      <div class="modal-content" data-astro-cid-r575xpuf>
+        <div class="modal-header" data-astro-cid-r575xpuf>
+          <h2 id="modal-title" data-astro-cid-r575xpuf></h2>
+          <button class="modal-close" id="modal-close" data-astro-cid-r575xpuf>
+            &times;
+          </button>
+        </div>
+        <div class="modal-period" data-astro-cid-r575xpuf>
+          <span id="modal-period-text" data-astro-cid-r575xpuf
+            >개발 기간: 2024.01 - 현재</span
+          >
+        </div>
+        <div class="modal-body" data-astro-cid-r575xpuf>
+          <div class="project-section" data-astro-cid-r575xpuf>
+            <h3 data-astro-cid-r575xpuf>역할</h3>
+            <div class="section-content" data-astro-cid-r575xpuf>
+              <div id="modal-role" data-astro-cid-r575xpuf>
+                <ul data-astro-cid-r575xpuf>
+                  <li data-astro-cid-r575xpuf>
+                    개인 프로젝트로 기획부터 배포까지 모든 과정을 담당
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="project-section" data-astro-cid-r575xpuf>
+            <h3 data-astro-cid-r575xpuf>성과</h3>
+            <div class="section-content" data-astro-cid-r575xpuf>
+              <div id="modal-achievements" data-astro-cid-r575xpuf>
+                <ul data-astro-cid-r575xpuf>
+                  <li data-astro-cid-r575xpuf>가족 정보 추출 및 검색 기능</li>
+                  <li data-astro-cid-r575xpuf>
+                    Firebase의 Flutter로 사용하여 효율적인 MVP를 제작
+                  </li>
+                  <li data-astro-cid-r575xpuf>
+                    2024년 졸업작품 아이디어 공모전 (1차/2차/3차 통과)
+                  </li>
+                  <li data-astro-cid-r575xpuf>
+                    순천대학교 Pre 스타트업 선정, 창업 지원에서 개발 중
+                  </li>
+                  <li data-astro-cid-r575xpuf>
+                    프론트엔드 리드로 발발, 팀리더로서 상업화 및 사업화 조치
+                    참여
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="project-section" data-astro-cid-r575xpuf>
+            <h3 data-astro-cid-r575xpuf>세부 내용</h3>
+            <div class="section-content" data-astro-cid-r575xpuf>
+              <div id="modal-details" data-astro-cid-r575xpuf>
+                <ul data-astro-cid-r575xpuf>
+                  <li data-astro-cid-r575xpuf>
+                    React, TypeScript를 통한 체계적 개발
+                  </li>
+                  <li data-astro-cid-r575xpuf>
+                    MSW ↔ Mock 서버 사용하여 API 연동 최적화
+                  </li>
+                  <li data-astro-cid-r575xpuf>
+                    Jira 기반 Agile 방법론 협업 방식
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="modal-links" data-astro-cid-r575xpuf>
+            <a
+              id="modal-github"
+              href="javascript:void(0)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn btn-primary"
+              data-astro-cid-r575xpuf
+            >
+              GitHub 보기
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script
+      type="module"
+      src="/_astro/index.astro_astro_type_script_index_0_lang.BqX1ZFWQ.js"
+    ></script>
+  </body>
+</html>

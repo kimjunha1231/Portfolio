@@ -1,5 +1,6 @@
 ---
 import BaseHead from "../components/BaseHead.astro";
+import { getCollection } from "astro:content";
 
 import HeroSection from "../components/HeroSection.astro";
 import CoreSkillsSection from "../components/CoreSkillsSection.astro";
@@ -9,6 +10,27 @@ import ContactSection from "../components/ContactSection.astro";
 import ProjectModal from "../components/ProjectModal.astro";
 import ScrollNavigation from "../components/ScrollNavigation.astro";
 import { SITE_TITLE, SITE_DESCRIPTION } from "../consts";
+
+// 프로젝트 데이터 가져오기
+const projects = await getCollection("projects");
+const sortedProjects = projects.sort((a, b) => a.data.order - b.data.order);
+
+// 클라이언트에서 사용할 프로젝트 데이터 구성
+const projectsData = sortedProjects.reduce(
+  (acc, project) => {
+    acc[project.data.order] = {
+      title: project.data.title,
+      period: project.data.period,
+      role: project.data.role,
+      achievements: project.data.achievements,
+      details: project.body, // 마크다운 본문 내용
+      github: project.data.github,
+      technologies: project.data.technologies,
+    };
+    return acc;
+  },
+  {} as Record<number, any>
+);
 ---
 
 <!doctype html>
@@ -24,6 +46,11 @@ import { SITE_TITLE, SITE_DESCRIPTION } from "../consts";
     <ProjectsSection />
     <ContactSection />
     <ProjectModal />
+
+    <!-- 프로젝트 데이터를 전역 변수로 설정 -->
+    <script define:vars={{ projectsData }}>
+      window.projectsData = projectsData;
+    </script>
 
     <script src="../scripts/index.js"></script>
   </body>

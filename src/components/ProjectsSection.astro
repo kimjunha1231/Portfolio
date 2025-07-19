@@ -1,5 +1,10 @@
 ---
-import { PROJECTS } from "../consts";
+import { getCollection } from "astro:content";
+
+// projects 컬렉션에서 모든 프로젝트 가져오기
+const projects = await getCollection("projects");
+// order 순으로 정렬
+const sortedProjects = projects.sort((a, b) => a.data.order - b.data.order);
 ---
 
 <section class="section section-alt" id="projects">
@@ -10,12 +15,21 @@ import { PROJECTS } from "../consts";
 
     <div class="card-grid">
       {
-        PROJECTS.map((project) => (
-          <div class="card project-card fade-in" data-project-id={project.id}>
-            <h3>{project.title}</h3>
-            <p>{project.description}</p>
+        sortedProjects.map((project) => (
+          <div
+            class="card project-card fade-in"
+            data-project-id={project.data.order}
+          >
+            <h3>{project.data.title}</h3>
+            <p class="project-period">{project.data.period}</p>
+            <div class="project-summary">
+              <div class="project-section">
+                <strong>주요 성과:</strong>
+                <span>{project.data.achievements}</span>
+              </div>
+            </div>
             <div class="tech-tags">
-              {project.technologies.map((tech) => (
+              {project.data.technologies.map((tech) => (
                 <span class="tech-tag">{tech}</span>
               ))}
             </div>
@@ -65,6 +79,59 @@ import { PROJECTS } from "../consts";
 
   .project-card:hover::before {
     opacity: 1;
+  }
+
+  .project-period {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+
+  .project-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+  }
+
+  .project-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .project-section strong {
+    color: var(--primary);
+    font-size: 0.9rem;
+  }
+
+  .project-section span {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: var(--text-light);
+  }
+
+  .tech-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: auto;
+  }
+
+  .tech-tag {
+    background: rgba(96, 165, 250, 0.1);
+    color: var(--primary);
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    transition: all 0.3s ease;
+  }
+
+  .project-card:hover .tech-tag {
+    background: rgba(96, 165, 250, 0.2);
+    border-color: rgba(96, 165, 250, 0.3);
   }
 
   .project-links {
