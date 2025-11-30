@@ -7,15 +7,13 @@ github: "https://github.com/TEAM-POKIE/Dearfam-Frontend"
 order: 2
 featured: true
 technologies:
-  [
-    "React",
-    "TypeScript",
-    "TailwindCSS",
-    "Zustand",
-    "Tanstack Query",
-    "Zod",
-    "MSW",
-  ]
+  - "React"
+  - "TypeScript"
+  - "TailwindCSS"
+  - "Zustand"
+  - "Tanstack Query"
+  - "Zod"
+  - "MSW"
 ---
 
 ## 주요 개발 내용

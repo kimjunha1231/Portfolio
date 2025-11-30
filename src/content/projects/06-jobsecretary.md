@@ -8,16 +8,14 @@ demo: "https://jobsecretary.vercel.app"
 order: 1
 featured: true
 technologies:
-  [
-    "Next.js",
-    "TypeScript",
-    "TailwindCSS",
-    "Zustand",
-    "Supabase",
-    "Gemini",
-    "Jest",
-    "Playwright",
-  ]
+  - "Next.js"
+  - "TypeScript"
+  - "TailwindCSS"
+  - "Zustand"
+  - "Supabase"
+  - "Gemini"
+  - "Jest"
+  - "Playwright"
 ---
 
 ## 프로젝트 개요
