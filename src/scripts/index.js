@@ -46,7 +46,12 @@ function getProjectsData() {
       processedData[key] = {
         ...project,
         role: `<ul><li>${project.role.replace(/,\s*/g, "</li><li>")}</li></ul>`,
-        achievements: `<ul><li>${project.achievements}</li></ul>`,
+        achievements: project.achievements
+          ? `<ul><li>${project.achievements}</li></ul>`
+          : "",
+        features: project.features
+          ? `<ul><li>${project.features.replace(/,\s*/g, "</li><li>")}</li></ul>`
+          : "",
         details: markdownToHtml(project.details),
       };
     }
@@ -158,12 +163,24 @@ function initModalFunctionality() {
       });
 
       // 각 섹션에 프로젝트별 데이터 설정
+      const modalAchievementsHeader = document.getElementById(
+        "modal-achievements-header"
+      );
+
       if (modalRole) {
         modalRole.innerHTML = project.role;
       }
 
       if (modalAchievements) {
-        modalAchievements.innerHTML = project.achievements;
+        if (project.features) {
+          modalAchievements.innerHTML = project.features;
+          if (modalAchievementsHeader)
+            modalAchievementsHeader.textContent = "주요 기능";
+        } else {
+          modalAchievements.innerHTML = project.achievements;
+          if (modalAchievementsHeader)
+            modalAchievementsHeader.textContent = "성과";
+        }
       }
 
       if (modalDetails) {

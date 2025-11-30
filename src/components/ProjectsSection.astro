@@ -24,8 +24,12 @@ const sortedProjects = projects.sort((a, b) => a.data.order - b.data.order);
             <p class="project-period">{project.data.period}</p>
             <div class="project-summary">
               <div class="project-section">
-                <strong>주요 성과:</strong>
-                <span>{project.data.achievements}</span>
+                <strong>
+                  {project.data.features ? "주요 기능:" : "주요 성과:"}
+                </strong>
+                <span>
+                  {project.data.features || project.data.achievements}
+                </span>
               </div>
             </div>
             <div class="tech-tags">

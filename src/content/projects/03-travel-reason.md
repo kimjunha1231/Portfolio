@@ -4,7 +4,7 @@ period: "2024.01.10 ~ 2024.02.19"
 role: "총 11명 (프론트엔드: 5명, 백엔드: 4명, 기획: 1명, 디자인: 1명) 중 프론트엔드 개발 담당, 로그인 및 마이페이지 개발 담당"
 achievements: "배포 후 동아리 데모데이 참석하여 사용자 반응을 확인"
 github: "https://github.com/Here-You/Frontend"
-order: 3
+order: 4
 featured: true
 technologies: ["React", "Styled-components", "JavaScript", "Zustand", "MSW"]
 ---

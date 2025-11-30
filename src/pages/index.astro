@@ -23,13 +23,14 @@ const projectsData = sortedProjects.reduce(
       period: project.data.period,
       role: project.data.role,
       achievements: project.data.achievements,
+      features: project.data.features,
       details: project.body, // 마크다운 본문 내용
       github: project.data.github,
       technologies: project.data.technologies,
     };
     return acc;
   },
-  {} as Record<number, any>
+  {} as Record<number, any>,
 );
 ---
 

@@ -4,7 +4,7 @@ period: "2025.05.20 ~ 현재"
 role: "총 4명 (프론트엔드: 1명, 백엔드: 2명, 디자인: 1명) 중 프론트엔드 개발 담당"
 achievements: "Google APAC Solution Challenge 참가, 데모데이 및 One Store, App Store 배포 예정"
 github: "https://github.com/gdsc-ssu/poppet-app"
-order: 5
+order: 6
 featured: true
 technologies: ["Flutter", "Riverpod", "Go_router"]
 ---

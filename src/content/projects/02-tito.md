@@ -4,7 +4,7 @@ period: "2024.03 ~ 2024.12"
 role: "프론트엔드 개발 리드 담당, 기획, 디자인, 서류 작성 참여"
 achievements: "2024년 ICT멘토링 프로젝트 한이음 트랙 은상 (정보통신기획평가원장상), Apple Store, One Store 출시"
 github: "https://github.com/TEAM-POKIE/Tito-Frontend"
-order: 2
+order: 3
 featured: true
 technologies:
   ["Flutter", "Riverpod", "Go_router", "DIO", "Retrofit", "shared_preferences"]
