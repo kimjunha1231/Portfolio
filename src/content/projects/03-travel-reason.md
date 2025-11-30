@@ -19,7 +19,7 @@ technologies: ["React", "Styled-components", "JavaScript", "Zustand", "MSW"]
 ### 기술적 구현
 
 - **MSW 활용**: MSW(Mock Service Worker) 사용
-  - 백엔드 연동전 MSW사용으로 코드 변동이 최소화, 추후 통신 방법만 변경하여 빠르게 기능 구현
+  - 백엔드 연동 전 MSW사용으로 코드 변동이 최소화, 추후 통신 방법만 변경하여 빠르게 기능 구현
 - **스타일링**: Styled-components로 css 디자인 코드 작성
 
 ### 프로젝트 관리

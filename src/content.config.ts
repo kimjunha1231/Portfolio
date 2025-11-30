@@ -26,6 +26,7 @@ const projects = defineCollection({
     role: z.string(),
     achievements: z.string().optional(),
     features: z.string().optional(),
+    demo: z.string().optional(),
     github: z.string().optional(),
     order: z.number(),
     featured: z.boolean().default(true),

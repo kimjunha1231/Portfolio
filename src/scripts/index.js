@@ -111,6 +111,7 @@ function initModalFunctionality() {
   const modalAchievements = document.getElementById("modal-achievements");
   const modalDetails = document.getElementById("modal-details");
   const modalGithub = document.getElementById("modal-github");
+  const modalDemo = document.getElementById("modal-demo");
   const modalClose = document.getElementById("modal-close");
   const modalPeriod = document.getElementById("modal-period-text");
   console.log("모달 요소들:", {
@@ -121,6 +122,7 @@ function initModalFunctionality() {
     modalAchievements: !!modalAchievements,
     modalDetails: !!modalDetails,
     modalGithub: !!modalGithub,
+    modalDemo: !!modalDemo,
     modalClose: !!modalClose,
   });
 
@@ -144,10 +146,19 @@ function initModalFunctionality() {
       modalAchievements &&
       modalDetails &&
       modalGithub &&
+      modalDemo &&
       modal
     ) {
       modalTitle.textContent = project.title;
       modalPeriod.textContent = `개발 기간: ${project.period}`;
+
+      // Demo Link 설정
+      if (project.demo) {
+        modalDemo.href = project.demo;
+        modalDemo.style.display = "inline-flex";
+      } else {
+        modalDemo.style.display = "none";
+      }
 
       // GitHub 링크 설정
       if (project.github) {
@@ -243,6 +254,26 @@ function initModalFunctionality() {
       }
     });
   });
+
+  // Demo 링크 클릭 이벤트 처리
+  if (modalDemo) {
+    modalDemo.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      console.log("Demo 링크 클릭됨:", this.href);
+
+      if (
+        this.href &&
+        this.href !== "#" &&
+        this.href !== "javascript:void(0)" &&
+        this.href !== window.location.href + "#" &&
+        this.href.startsWith("http")
+      ) {
+        window.open(this.href, "_blank", "noopener,noreferrer");
+      }
+    });
+  }
 
   // 모달 닫기 이벤트
   if (modalClose) {

@@ -26,6 +26,7 @@ const projectsData = sortedProjects.reduce(
       features: project.data.features,
       details: project.body, // 마크다운 본문 내용
       github: project.data.github,
+      demo: project.data.demo,
       technologies: project.data.technologies,
     };
     return acc;
