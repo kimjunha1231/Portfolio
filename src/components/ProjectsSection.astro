@@ -37,6 +37,32 @@ const sortedProjects = projects.sort((a, b) => a.data.order - b.data.order);
                 <span class="tech-tag">{tech}</span>
               ))}
             </div>
+
+            <div
+              class="project-links"
+              style="margin-top: 1rem; display: flex; gap: 0.5rem; z-index: 10;"
+            >
+              {project.data.demo && (
+                <a
+                  href={project.data.demo}
+                  target="_blank"
+                  class="project-link-btn demo-link"
+                  onclick="event.stopPropagation()"
+                >
+                  Demo
+                </a>
+              )}
+              {project.data.github && (
+                <a
+                  href={project.data.github}
+                  target="_blank"
+                  class="project-link-btn github-link"
+                  onclick="event.stopPropagation()"
+                >
+                  GitHub
+                </a>
+              )}
+            </div>
           </div>
         ))
       }
@@ -154,5 +180,38 @@ const sortedProjects = projects.sort((a, b) => a.data.order - b.data.order);
 
   .project-link:hover {
     color: var(--primary-dark);
+  }
+
+  .project-link-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.8rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .demo-link {
+    background: rgba(59, 130, 246, 0.1);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.3);
+  }
+
+  .demo-link:hover {
+    background: rgba(59, 130, 246, 0.2);
+    transform: translateY(-2px);
+  }
+
+  .github-link {
+    background: rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+  }
+
+  .github-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
   }
 </style>
