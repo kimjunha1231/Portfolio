@@ -4,7 +4,7 @@ period: "약 5일 (약 30시간 소요)"
 role: "1인 + AI, 기획, 디자인, 프론트엔드, 백엔드, DB구축, AI기능 개발"
 features: "AI 자기소개서 초안 작성, AI 자기소개서 교정, AI 면접 질문 생성, 칸반 보드형 지원 관리"
 github: ""
-demo: "https://jobsecretary.vercel.app"
+demo: "https://jobsecretary.lat/"
 order: 1
 featured: true
 technologies:
