@@ -11,7 +11,7 @@ export const PERSONAL_INFO = {
   email: "rlawnsgk0610@gmail.com",
   github: "https://github.com/kimjunha1231",
   description:
-    "함께 성장하는 개발자를 꿈꾸는 프론트엔드 엔지니어 김준하입니다.",
+    "안녕하세요. 플랫폼의 제약에 갇히지 않고, 사용자에게 가장 필요한 형태로 서비스를 구현하는 것을 지향합니다.",
 };
 
 // 기술 스택
