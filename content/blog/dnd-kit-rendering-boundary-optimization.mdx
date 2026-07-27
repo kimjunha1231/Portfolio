@@ -50,15 +50,14 @@ JobSecretary 칸반 보드에서 카드 하나를 드래그했을 뿐인데 이�
 
 구조를 단순화하면 다음과 같습니다.
 
-```mermaid
-flowchart TD
-  D[DndContext\n센서·충돌·드래그 상태] --> S[SortableContext\nitems·strategy·정렬 좌표]
-  S --> A[SortableCard A\nuseSortable]
-  S --> B[SortableCard B\nuseSortable]
-  S --> C[SortableCard C\nuseSortable]
-  A --> AUI[회사명·직무·마감일]
-  B --> BUI[회사명·직무·마감일]
-  C --> CUI[회사명·직무·마감일]
+```text
+DndContext (드래그 센서·충돌 검출·글로벌 드래그 상태 관리)
+  │
+  └── SortableContext (items 목록·strategy·정렬 좌표 Context 전파)
+        │
+        ├── SortableCard A (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
+        ├── SortableCard B (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
+        └── SortableCard C (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
 ```
 
 `SortableContext`의 역할은 단순히 아이디 배열을 보관하는 것이 아닙니다. 정렬 전략이 계산할 수 있도록 `items`, `activeIndex`, `overIndex`, 측정된 사각형(`sortedRects`), `useDragOverlay` 등의 값을 Context로 묶어 하위 아이템에 전달합니다. 공식 저장소의 `SortableContext.tsx`는 `useDndContext()`에서 `active`, `over`, `droppableRects`를 읽고, 이를 바탕으로 Context value를 `useMemo`로 생성합니다. [SortableContext.tsx 소스](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/components/SortableContext.tsx)
@@ -96,7 +95,7 @@ return (
 그리고 `useSortable`은 이 Context를 직접 읽습니다. 현재 저장소의 Hook을 보면 첫 단계에서 `useContext(Context)`로 `items`, `activeIndex`, `overIndex`, `sortedRects`, `strategy`를 꺼내고, 이어서 `useDroppable`과 `useDraggable`을 호출합니다. 마지막에는 정렬 전략으로 계산한 `transform`과 `transition`을 반환합니다. [useSortable.ts 소스](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/hooks/useSortable.ts)
 
 ```tsx
-// useSortable.ts의 중요한 부분을 개념적으로 줄인 코드
+// useSortable.ts의 중요한 부분을 개념적으로 줄인 코드입니다.
 const {
   items,
   activeIndex,
@@ -105,7 +104,7 @@ const {
   strategy,
 } = useContext(Context);
 
-const {transform, listeners, attributes, setNodeRef} = useDraggable({
+const { transform, listeners, attributes, setNodeRef } = useDraggable({
   id,
   data,
 });
@@ -135,39 +134,35 @@ return {
 
 포인터가 움직일 때 센서는 현재 위치를 갱신하고, `DndContext`는 활성 아이템과 충돌 대상을 다시 계산합니다. `SortableContext`는 그 결과를 `activeIndex`, `overIndex`, `sortedRects` 같은 값으로 변환합니다. 이 값은 정렬 가능한 모든 아이템이 참고할 수 있어야 하므로, 각 `useSortable` 소비자에게 전달됩니다.
 
-```mermaid
-sequenceDiagram
-  participant P as Pointer Sensor
-  participant D as DndContext
-  participant S as SortableContext
-  participant C as useSortable 카드들
-  participant U as 카드 콘텐츠
-
-  P->>D: pointermove
-  D->>D: active·over·측정값 계산
-  D->>S: useDndContext 결과 변경
-  S->>C: Context value 변경 전달
-  C->>C: transform·transition 계산
-  C->>U: 같은 컴포넌트 안의 콘텐츠도 재실행
+```text
+[1] Pointer Sensor (pointermove 이벤트 발생)
+      ↓
+[2] DndContext (active · over · 드래그 측정값 계산)
+      ↓
+[3] SortableContext (새로운 Context value 생성 후 하위 전파)
+      ↓
+[4] useSortable 카드들 (Context 구독으로 인해 transform · transition 재계산)
+      ↓
+[5] 카드 UI 콘텐츠 (동일 컴포넌트에 위치한 무거운 카드 UI도 함께 재실행)
 ```
 
 이 설계는 기능적으로 자연스럽습니다. 다른 카드도 현재 위치에 따라 이동해야 하므로 정렬 계산에 참여해야 합니다. 문제는 정렬 계산과 카드 콘텐츠의 책임을 하나의 컴포넌트에 같이 넣었을 때 생깁니다.
 
 ```tsx
-function SortableCard({application}: {application: Application}) {
+function SortableCard({ application }: { application: Application }) {
   const {
     attributes,
     listeners,
     setNodeRef,
     transform,
     transition,
-  } = useSortable({id: application.id});
+  } = useSortable({ id: application.id });
 
-  // transform이 바뀌지 않은 카드라도 이 컴포넌트 함수가 다시 호출될 수 있습니다.
+  // ⚠️ transform이 바뀌지 않은 카드라도 Context 변경으로 인해 이 컴포넌트 전체가 다시 실행됩니다.
   return (
     <article
       ref={setNodeRef}
-      style={{transform: CSS.Transform.toString(transform), transition}}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
     >
@@ -199,11 +194,12 @@ function SortableCard({application}: {application: Application}) {
 하지만 `memo`로 감싼 컴포넌트가 Context를 직접 읽으면 이야기가 달라집니다.
 
 ```tsx
-const Card = memo(function Card({application}: Props) {
-  const sortable = useSortable({id: application.id});
+// ❌ 문제 구조: React.memo로 감싸도 내부에서 Context를 직접 구독하면 재렌더링을 막을 수 없습니다.
+const SortableCard = memo(function SortableCard({ application }: Props) {
+  // useSortable Hook이 상위 SortableContext의 변경을 직접 읽음
+  const sortable = useSortable({ id: application.id });
 
-  // application Props가 같아도 useSortable이 읽은 Context가 바뀌면
-  // Card는 드래그 상태를 반영하기 위해 다시 실행될 수 있습니다.
+  // application Props가 동일해도 Context가 변하면 이 컴포넌트는 다시 실행됩니다.
   return <CardView application={application} sortable={sortable} />;
 });
 ```
@@ -211,6 +207,9 @@ const Card = memo(function Card({application}: Props) {
 `memo`는 Context 소비자를 Context 변경으로부터 격리하는 장치가 아닙니다. 그래서 다음과 같은 구조가 더 효과적입니다.
 
 ```tsx
+// ✅ 개선 구조: 드래그 상태를 아는 외곽 셸과 순수 UI 콘텐츠를 분리
+
+// 1. 순수 카드 UI 콘텐츠 (Context에 의존하지 않는 메모이제이션된 컴포넌트)
 const CardContent = memo(function CardContent({
   company,
   role,
@@ -227,17 +226,19 @@ const CardContent = memo(function CardContent({
   );
 });
 
-function SortableCardShell({application, onDelete}: Props) {
-  const {setNodeRef, listeners, attributes, transform, transition} =
-    useSortable({id: application.id});
+// 2. 외곽 드래그 셸 (useSortable Context 구독 및 포지션 스타일 계산 전담)
+function SortableCardShell({ application, onDelete }: Props) {
+  const { setNodeRef, listeners, attributes, transform, transition } =
+    useSortable({ id: application.id });
 
   return (
     <article
       ref={setNodeRef}
-      style={{transform: CSS.Transform.toString(transform), transition}}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
     >
+      {/* 셸이 재실행되어도 Props 참조가 같으면 CardContent 렌더링은 건너끕니다 */}
       <CardContent
         company={application.company}
         role={application.role}
@@ -258,15 +259,15 @@ function SortableCardShell({application, onDelete}: Props) {
 Render Props는 컴포넌트가 계산한 값을 함수의 인자로 넘기고, 호출자가 그 값을 사용해 무엇을 렌더링할지 결정하는 패턴입니다. 함수 이름이 반드시 `render`일 필요는 없습니다. React의 Render Props 문서도 `children`에 함수를 전달하는 방식까지 Render Props로 설명합니다. [Render Props 공식 문서](https://legacy.reactjs.org/docs/render-props.html)
 
 ```tsx
-function Mouse({children}: {children: (position: Point) => React.ReactNode}) {
-  const [position, setPosition] = useState({x: 0, y: 0});
+function Mouse({ children }: { children: (position: Point) => React.ReactNode }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) =>
-      setPosition({x: event.clientX, y: event.clientY});
+      setPosition({ x: event.clientX, y: event.clientY });
 
-    window.addEventListener('mousemove', handleMove);
-    return () => window.removeEventListener('mousemove', handleMove);
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
   }, []);
 
   return children(position);
@@ -275,7 +276,7 @@ function Mouse({children}: {children: (position: Point) => React.ReactNode}) {
 function Screen() {
   return (
     <Mouse>
-      {({x, y}) => <p>현재 좌표: {x}, {y}</p>}
+      {({ x, y }) => <p>현재 좌표: {x}, {y}</p>}
     </Mouse>
   );
 }
@@ -391,7 +392,7 @@ export function KanbanCard({
     </article>
   );
 
-  return isDragging && typeof document !== 'undefined'
+  return isDragging && typeof document !== "undefined"
     ? createPortal(card, document.body)
     : card;
 }
@@ -434,7 +435,7 @@ const SortableCardContent = memo(function SortableCardContent({
   );
 });
 
-function SortableCard({application}: {application: Application}) {
+function SortableCard({ application }: { application: Application }) {
   const {
     attributes,
     listeners,
@@ -442,7 +443,7 @@ function SortableCard({application}: {application: Application}) {
     setActivatorNodeRef,
     transform,
     transition,
-  } = useSortable({id: application.id});
+  } = useSortable({ id: application.id });
 
   return (
     <article
@@ -495,7 +496,7 @@ const card = (
   </article>
 );
 
-return isDragging && typeof document !== 'undefined'
+return isDragging && typeof document !== "undefined"
   ? createPortal(card, document.body)
   : card;
 ```
@@ -521,7 +522,7 @@ function Board() {
 
   return (
     <DndContext
-      onDragStart={({active}) => setActiveId(String(active.id))}
+      onDragStart={({ active }) => setActiveId(String(active.id))}
       onDragEnd={() => setActiveId(null)}
       onDragCancel={() => setActiveId(null)}
     >
