@@ -10,7 +10,6 @@ const BLOG_SECTIONS = [
   { key: "all", label: "전체" },
   { key: "development-log", label: "개발 기록" },
   { key: "technical-note", label: "기술 노트" },
-  { key: "reference", label: "레퍼런스" },
 ] as const;
 
 type BlogListPageProps = {
@@ -20,7 +19,6 @@ type BlogListPageProps = {
 const SECTION_LABELS: Record<string, string> = {
   "development-log": "개발 기록",
   "technical-note": "기술 노트",
-  reference: "레퍼런스",
 };
 
 export const metadata: Metadata = {
@@ -104,41 +102,42 @@ export default async function BlogListPage({ searchParams }: BlogListPageProps) 
             프론트엔드와 웹 애니메이션 최적화, 풀스택 아키텍처 구현 과정에서 얻은 깊이 있는 고찰과 기록입니다.
           </p>
 
-          <div className="mt-8 flex flex-col gap-2.5 sm:flex-row sm:items-center">
-            <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-              Section
-            </span>
-            <nav aria-label="블로그 분류" className="flex flex-wrap gap-2">
-              {BLOG_SECTIONS.map((section) => {
-                const isSelected = section.key === selectedSection;
-                const href = section.key === "all" ? "/blog" : `/blog?section=${section.key}`;
+          <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-b border-card-border/60 py-4">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-foreground/40">
+                Section
+              </span>
+              <nav aria-label="블로그 분류" className="flex flex-wrap gap-1.5">
+                {BLOG_SECTIONS.map((section) => {
+                  const isSelected = section.key === selectedSection;
+                  const href = section.key === "all" ? "/blog" : `/blog?section=${section.key}`;
 
-                return (
-                  <Link
-                    key={section.key}
-                    href={href}
-                    aria-current={isSelected ? "page" : undefined}
-                    className={`rounded-full border px-3.5 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background ${isSelected
-                        ? "border-accent-blue bg-accent-blue text-white"
-                        : "border-card-border text-foreground/60 hover:border-accent-blue/50 hover:text-accent-blue"
-                      }`}
-                  >
-                    {section.label}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
+                  return (
+                    <Link
+                      key={section.key}
+                      href={href}
+                      aria-current={isSelected ? "page" : undefined}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue ${isSelected
+                          ? "bg-accent-blue text-white shadow-sm"
+                          : "border border-card-border/70 text-foreground/60 hover:border-accent-blue/40 hover:text-accent-blue hover:bg-accent-blue/5"
+                        }`}
+                    >
+                      {section.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-4">
-            {selectedSection !== "all" && (
-              <p className="text-xs font-mono text-foreground/45">
-                현재 분류: {selectedSectionLabel}
-              </p>
-            )}
-            <p className="text-xs font-mono text-foreground/45">
-              {visiblePosts.length}개의 글
-            </p>
+            <div className="flex items-center gap-3 text-xs font-mono text-foreground/50">
+              {selectedSection !== "all" && (
+                <>
+                  <span>분류: <strong className="font-normal text-foreground/80">{selectedSectionLabel}</strong></span>
+                  <span className="w-1 h-1 rounded-full bg-foreground/20" aria-hidden="true" />
+                </>
+              )}
+              <span>총 <strong className="font-normal text-accent-blue">{visiblePosts.length}</strong>개의 포스트</span>
+            </div>
           </div>
         </div>
       </div>

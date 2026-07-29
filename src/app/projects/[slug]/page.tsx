@@ -130,6 +130,18 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
                 <span>GitHub 저장소</span>
               </a>
             )}
+            {project.demoUrl && (
+              <a
+                href={project.demoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-accent-blue px-4 py-2 text-xs font-mono text-white transition-colors hover:bg-accent-blue/85"
+                aria-label={`${project.title} 서비스 열기`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>서비스 열기</span>
+              </a>
+            )}
             <CopyMarkdownButton content={cleanMarkdownContent} />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { cache } from "react";
 import matter from "gray-matter";
 import {
@@ -11,6 +12,13 @@ import {
 
 // 콘텐츠 루트 경로 설정
 const CONTENT_PATH = path.join(process.cwd(), "content");
+
+type LastModifiedCacheEntry = {
+  mtimeMs: number;
+  value: string;
+};
+
+const lastModifiedCache = new Map<string, LastModifiedCacheEntry>();
 
 export interface MDXPost {
   slug: string;
@@ -28,6 +36,7 @@ export interface MDXPost {
   coverAlt?: string;
   coverFit?: "cover" | "contain";
   githubUrl?: string;
+  demoUrl?: string;
   content: string;
 }
 
@@ -60,15 +69,92 @@ function parseProjectRole(value: unknown): ProjectRole | undefined {
     : undefined;
 }
 
-function parsePostData(slug: string, fileContent: string): MDXPost {
+function formatFileDate(filePath: string) {
+  try {
+    return fs.statSync(filePath).mtime.toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
+function getGitDate(filePath: string) {
+  const relativePath = path.relative(process.cwd(), filePath);
+
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+
+    const isTracked = execFileSync(
+      "git",
+      ["ls-files", "--error-unmatch", "--", relativePath],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    ).trim();
+
+    if (!isTracked) return "";
+
+    const hasWorkingTreeChanges = (() => {
+      try {
+        execFileSync("git", ["diff", "--quiet", "--", relativePath], {
+          cwd: process.cwd(),
+          stdio: "ignore",
+        });
+        execFileSync("git", ["diff", "--cached", "--quiet", "--", relativePath], {
+          cwd: process.cwd(),
+          stdio: "ignore",
+        });
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+
+    if (hasWorkingTreeChanges) return formatFileDate(filePath);
+
+    return execFileSync("git", ["log", "-1", "--format=%cs", "--", relativePath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function getAutomaticLastModified(filePath: string, fallback: string) {
+  let mtimeMs = 0;
+
+  try {
+    mtimeMs = fs.statSync(filePath).mtimeMs;
+  } catch {
+    return fallback;
+  }
+
+  const cached = lastModifiedCache.get(filePath);
+  if (cached?.mtimeMs === mtimeMs) return cached.value;
+
+  const value = getGitDate(filePath) || fallback;
+  lastModifiedCache.set(filePath, { mtimeMs, value });
+  return value;
+}
+
+function parsePostData(slug: string, fileContent: string, filePath?: string): MDXPost {
   const { data, content } = matter(fileContent);
   const date = parseFrontmatterDate(data.date);
+  const frontmatterLastModified = parseFrontmatterDate(data.lastModified) || date;
 
   return {
     slug,
     title: data.title || "Untitled",
     date,
-    lastModified: parseFrontmatterDate(data.lastModified) || date,
+    lastModified: filePath
+      ? getAutomaticLastModified(filePath, frontmatterLastModified)
+      : frontmatterLastModified,
     section: typeof data.section === "string" ? data.section : "",
     category: data.category || "",
     projectCategory:
@@ -81,6 +167,7 @@ function parsePostData(slug: string, fileContent: string): MDXPost {
     coverAlt: typeof data.coverAlt === "string" ? data.coverAlt : "",
     coverFit: parseCoverFit(data.coverFit),
     githubUrl: typeof data.githubUrl === "string" ? data.githubUrl : "",
+    demoUrl: typeof data.demoUrl === "string" ? data.demoUrl : "",
     content,
   };
 }
@@ -131,6 +218,7 @@ export function toRawMarkdown(post: MDXPost) {
     ...(post.coverAlt ? [`coverAlt: ${JSON.stringify(post.coverAlt)}`] : []),
     ...(post.coverFit ? [`coverFit: ${JSON.stringify(post.coverFit)}`] : []),
     ...(post.githubUrl ? [`githubUrl: ${JSON.stringify(post.githubUrl)}`] : []),
+    ...(post.demoUrl ? [`demoUrl: ${JSON.stringify(post.demoUrl)}`] : []),
     ...(post.description
       ? [`description: ${JSON.stringify(post.description)}`]
       : []),
@@ -160,7 +248,7 @@ export const getAllPosts = cache((type: "blog" | "projects"): MDXPost[] => {
       const fileContent = fs.readFileSync(filePath, "utf-8");
       const slug = file.replace(/\.mdx?$/, "");
 
-      return parsePostData(slug, fileContent);
+      return parsePostData(slug, fileContent, filePath);
     });
 
   // 프로젝트는 프로젝트 날짜, 블로그는 최종 업데이트일 기준으로 최신순 정렬
@@ -197,5 +285,5 @@ export const getPostBySlug = cache((type: "blog" | "projects", slug: string): MD
   }
 
   const fileContent = fs.readFileSync(finalPath, "utf-8");
-  return parsePostData(slug, fileContent);
+  return parsePostData(slug, fileContent, finalPath);
 });

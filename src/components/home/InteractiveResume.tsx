@@ -94,7 +94,7 @@ export default function InteractiveResume() {
                채용 공고와 지원 현황, 자기소개서, PDF 변환, AI 면접 질문 생성을 하나의 흐름으로 연결한 취업 준비 관리 서비스입니다.
              </p>
               <ul className="list-disc pl-4 text-sm font-normal text-foreground/90 space-y-2.5 leading-relaxed">
-               <li><strong>칸반보드 렌더링 최적화</strong>: React Developer Tools Profiler에서 동일한 드래그 시나리오를 비교해 전체 커밋 271회에서 98회, 비활성 카드 리렌더링 268회에서 0회로 감소</li>
+               <li><strong>칸반 보드 렌더링 최적화</strong>: 드래그 상태와 카드 콘텐츠의 렌더링 경계를 분리해 불필요한 카드 리렌더링을 줄임</li>
                <li><strong>자기소개서 작성 안정화</strong>: React Hook Form의 비제어 입력과 isDirty 기반 이탈 경고로 폼 입력과 서버 저장 시점을 분리</li>
                <li><strong>FSD 패턴 적용</strong>: App·Widgets·Features·Entities·Shared 계층으로 페이지 조립, 사용자 기능, 도메인 모델의 책임과 의존성 방향을 정리</li>
              </ul>

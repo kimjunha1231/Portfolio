@@ -28,11 +28,13 @@ export const metadata: Metadata = {
 
 type ProjectsListPageProps = {
   searchParams: Promise<{
+    section?: string | string[];
     role?: string | string[];
   }>;
 };
 
 type ProjectFilters = {
+  section: "featured" | "side";
   role: ProjectRole | "all";
 };
 
@@ -44,69 +46,37 @@ function getFilterHref(current: ProjectFilters, updates: Partial<ProjectFilters>
   const filters = { ...current, ...updates };
   const query = new URLSearchParams();
 
+  if (filters.section !== "featured") query.set("section", filters.section);
   if (filters.role !== "all") query.set("role", filters.role);
 
   const queryString = query.toString();
   return queryString ? `/projects?${queryString}` : "/projects";
 }
 
-function FilterGroup({
-  label,
-  options,
-  selected,
-  current,
-}: {
-  label: string;
-  options: Array<{ value: string; label: string }>;
-  selected: string;
-  current: ProjectFilters;
-}) {
-  return (
-    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-      <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-foreground/45">
-        {label}
-      </span>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => {
-          const isSelected = option.value === selected;
-
-          return (
-            <Link
-              key={option.value}
-              href={getFilterHref(current, {
-                role: option.value as ProjectRole | "all",
-              })}
-              aria-current={isSelected ? "page" : undefined}
-              className={`rounded-full border px-3.5 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background ${isSelected
-                ? "border-accent-blue bg-accent-blue text-white"
-                : "border-card-border text-foreground/60 hover:border-accent-blue/50 hover:text-accent-blue"
-                }`}
-            >
-              {option.label}
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default async function ProjectsListPage({ searchParams }: ProjectsListPageProps) {
   const params = await searchParams;
   const posts = getAllPosts("projects");
+  const requestedSection = getSearchParam(params.section) || "featured";
+  const selectedSection = requestedSection === "side" ? "side" : "featured";
   const requestedRole = getSearchParam(params.role) || "all";
   const selectedRole = PROJECT_ROLES.includes(requestedRole as ProjectRole)
     ? (requestedRole as ProjectRole)
     : "all";
   const currentFilters: ProjectFilters = {
+    section: selectedSection,
     role: selectedRole,
   };
 
   const visiblePosts = posts.filter((project) => {
+    const matchesSection = selectedSection === "side"
+      ? project.section === "side"
+      : project.section !== "side";
     const matchesRole = selectedRole === "all" || project.role === selectedRole;
 
-    return matchesRole;
+    return matchesSection && matchesRole;
   });
+
+  const isSideProjects = selectedSection === "side";
 
   const projects = visiblePosts.map((project) => ({
     slug: project.slug,
@@ -147,8 +117,10 @@ export default async function ProjectsListPage({ searchParams }: ProjectsListPag
           "@type": "CollectionPage",
           "@id": new URL("/projects#collection", SITE_URL).toString(),
           url: new URL("/projects", SITE_URL).toString(),
-          name: "프로젝트",
-          description: SITE_DESCRIPTION,
+          name: isSideProjects ? "사이드 프로젝트" : "프로젝트",
+          description: isSideProjects
+            ? "불편한 점을 직접 정리하고, AI를 활용해 필요한 서비스부터 빠르게 만들어 봅니다."
+            : SITE_DESCRIPTION,
           dateModified: getLatestLastModified(visiblePosts, SITE_LAST_MODIFIED),
           isPartOf: { "@id": `${SITE_URL.toString()}#website` },
           mainEntity: {
@@ -166,33 +138,91 @@ export default async function ProjectsListPage({ searchParams }: ProjectsListPag
       <div className="mb-12">
         <div className="mx-auto max-w-7xl">
           <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-foreground/50">
-            Project
+            {isSideProjects ? "Side Projects" : "Project"}
           </span>
           <h1 id="projects-heading" className="mt-2 text-4xl font-light leading-none tracking-tight md:text-6xl">
-            Project
+            {isSideProjects ? "사이드 프로젝트" : "프로젝트"}
           </h1>
           <p className="mt-4 max-w-2xl text-sm font-light leading-relaxed text-foreground/60">
-            프로젝트별 문제 정의, 담당 역할, 기술적 선택과 결과를 케이스 스터디로 정리했습니다.
+            {isSideProjects
+              ? "불편한 점을 직접 정리하고, AI를 활용해 필요한 서비스부터 빠르게 만들어 봅니다."
+              : "프로젝트별 문제 정의, 담당 역할, 기술적 선택과 결과를 케이스 스터디로 정리했습니다."}
           </p>
 
-          <div className="mt-8 space-y-4" aria-label="프로젝트 필터">
-            <FilterGroup
-              label="Role"
-              options={[
-                { value: "all", label: "전체" },
-                ...PROJECT_ROLES.map((role) => ({
-                  value: role,
-                  label: PROJECT_ROLE_LABELS[role],
-                })),
-              ]}
-              selected={selectedRole}
-              current={currentFilters}
-            />
+          <div className="mt-8 space-y-4" aria-label="프로젝트 구분과 필터">
+            <div className="flex flex-wrap items-center gap-3 border-t border-card-border/60 pt-4" aria-label="프로젝트 구분">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-foreground/40">
+                View
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "featured", label: "대표 프로젝트" },
+                  { value: "side", label: "사이드 프로젝트" },
+                ].map((option) => {
+                  const isSelected = option.value === selectedSection;
+                  return (
+                    <Link
+                      key={option.value}
+                      href={getFilterHref(currentFilters, {
+                        section: option.value as ProjectFilters["section"],
+                      })}
+                      aria-current={isSelected ? "page" : undefined}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue ${isSelected
+                          ? "bg-accent-blue text-white shadow-sm"
+                          : "border border-card-border/70 text-foreground/60 hover:border-accent-blue/40 hover:text-accent-blue hover:bg-accent-blue/5"
+                        }`}
+                    >
+                      {option.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 border-b border-card-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between" aria-label="역할 필터">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-foreground/40">
+                Role
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "all", label: "전체" },
+                  ...PROJECT_ROLES.map((role) => ({
+                    value: role,
+                    label: PROJECT_ROLE_LABELS[role],
+                  })),
+                ].map((option) => {
+                  const isSelected = option.value === selectedRole;
+                  return (
+                    <Link
+                      key={option.value}
+                      href={getFilterHref(currentFilters, {
+                        role: option.value as ProjectRole | "all",
+                      })}
+                      aria-current={isSelected ? "page" : undefined}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue ${isSelected
+                          ? "bg-accent-blue text-white shadow-sm"
+                          : "border border-card-border/70 text-foreground/60 hover:border-accent-blue/40 hover:text-accent-blue hover:bg-accent-blue/5"
+                        }`}
+                    >
+                      {option.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs font-mono text-foreground/50">
+              {selectedRole !== "all" && (
+                <>
+                  <span>역할: <strong className="font-normal text-foreground/80">{PROJECT_ROLE_LABELS[selectedRole]}</strong></span>
+                  <span className="w-1 h-1 rounded-full bg-foreground/20" aria-hidden="true" />
+                </>
+              )}
+              <span>총 <strong className="font-normal text-accent-blue">{visiblePosts.length}</strong>개의 프로젝트</span>
+            </div>
+            </div>
           </div>
-
-          <p className="mt-6 font-mono text-[10px] text-foreground/45">
-            {visiblePosts.length}개의 프로젝트
-          </p>
         </div>
       </div>
 

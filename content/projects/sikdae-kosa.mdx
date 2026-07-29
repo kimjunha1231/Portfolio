@@ -1,0 +1,79 @@
+---
+title: "식권대장 KOSA : 교육생을 위한 식사 정보 서비스"
+section: "side"
+category: "Full Stack / 개인 프로젝트"
+projectCategory: "식사 정보"
+platforms: ["web"]
+role: "fullstack"
+tags: ["Next.js", "TypeScript", "Firebase", "Kakao Maps", "RapidAPI", "Vercel Cron"]
+cover: "/images/projects/sikdae-kosa.png"
+coverAlt: "식권대장 KOSA 대시보드의 식당 목록과 지도 화면"
+githubUrl: "https://github.com/kimjunha1231/sikdae-kosa"
+demoUrl: "https://sikdae-kosa.vercel.app/"
+date: "2026-06-23"
+lastModified: "2026-06-23"
+description: "식권대장 앱의 메뉴·매장 정보 확인 흐름을 다시 구성하고, Firebase·Kakao Maps·Instagram 메뉴 자동 수집을 연결한 KOSA 교육생용 식당 대시보드입니다."
+---
+
+## 프로젝트 개요
+
+현대퓨처넷 채용연계형 MSA 기반 Full Stack 개발 전문가 양성과정에 참여하면서 식권대장 앱을 사용했습니다. 메뉴 이름과 가격, 이미지를 한 번에 확인하기 어려웠고 매장 정보도 따로 찾아봐야 했습니다. 그래서 송파 IT벤처타워 주변 식당 데이터를 정리하고, 같은 교육생들이 점심 메뉴를 확인할 때 필요한 기능을 한 화면에 모았습니다.
+
+- **구분**: 사이드 프로젝트 (1인 개발)
+- **기간**: 2026.06
+- **담당 범위**: 기획·데이터 모델링·API·화면 구성·Firebase 연동·자동화·배포
+- **초기 데이터**: 송파 IT벤처타워 주변 식당 84개
+- **배포**: Vercel
+- **서비스**: [sikdae-kosa.vercel.app](https://sikdae-kosa.vercel.app/)
+
+## 주요 기능
+
+- **식당 검색·필터·정렬**: 식당명과 대표 메뉴를 검색하고, 한식·중식·일식·양식·분식 등 카테고리와 거리순·평점순·이름순 정렬을 지원합니다.
+- **메뉴와 매장 정보 확인**: 식당별 메뉴명·가격·이미지·영업시간·네이버 지도 링크를 상세 모달에서 함께 확인할 수 있습니다.
+- **리뷰 작성과 메뉴별 평점**: Firebase Realtime Database에 리뷰를 저장하고, 메뉴별 평점과 최신순·평점순 필터를 제공합니다.
+- **리뷰 이미지 업로드**: 첨부 이미지를 브라우저에서 JPEG로 압축한 뒤 Firebase Storage에 업로드하고 리뷰와 연결합니다.
+- **식당 선택 룰렛**: 2km 이내 식당 또는 직접 고른 식당만 후보로 두고, 오늘 갈 식당을 무작위로 추천합니다.
+- **실시간 방 만들기**: 공유 링크로 방에 들어와 참여자·선택 식당·룰렛 결과를 함께 동기화할 수 있습니다.
+- **K밥상 메뉴 자동 반영**: RapidAPI Instagram Scraper에서 최신 게시물을 가져와 당일 메뉴인지 확인한 뒤 Firebase에 저장합니다.
+
+## 구현 구조
+
+### 1. 식당 데이터와 API 구성
+
+기본 식당 정보는 `src/data/restaurants.json`에 저장하고, `/api/restaurants`에서 목록을 읽어 클라이언트에 전달하도록 구성했습니다. `Restaurant` 타입에는 식당명·카테고리·좌표·영업시간·네이버 링크·메뉴 배열을 함께 두었습니다. API에는 목록 조회뿐 아니라 식당 추가·수정·삭제를 위한 `POST`·`PUT`·`DELETE`도 포함했습니다.
+
+`GET /api/restaurants`에서는 Firebase Realtime Database에서 리뷰와 K밥상 데이터를 병렬로 읽습니다. Firebase 연결이 실패하거나 설정되지 않은 경우에도 기본 JSON 데이터는 먼저 보여주도록 했고, 외부 호출에는 2초 타임아웃을 적용했습니다. 리뷰가 있으면 식당별 평균 평점과 리뷰 개수를 목록에 합쳐 반환합니다.
+
+### 2. Kakao Maps와 식당 목록 연결
+
+Kakao Maps SDK는 브라우저에서 동적으로 불러오도록 하고, 앱 환경변수에 키가 없을 때는 `localStorage`에 저장한 키를 사용할 수 있게 했습니다. 기준 위치에서 각 식당까지의 거리는 Haversine 공식으로 계산하고, 지도 확대 수준에 따라 가까운 마커를 클라이언트에서 묶어 표시했습니다. 식당 카테고리별로 지도 마커 색상도 다르게 적용했습니다.
+
+### 3. K밥상 자동 업데이트
+
+K밥상은 매일 Instagram에 올라오는 식단표를 확인해야 해서 정적인 데이터로 관리하기 어려웠습니다. `/api/cron/kbabsang`에서 RapidAPI의 Instagram Scraper로 `kbabsang_official` 피드의 최신 게시물을 가져오고, 게시 시각 또는 본문 날짜가 한국 시간 기준 오늘인지 확인합니다. 오늘 게시물이 맞을 때만 이미지 URL·게시물 URL·업데이트 날짜를 Firebase의 `kbabsang/today`에 기록합니다.
+
+`vercel.json`에는 같은 API를 호출하는 Cron 스케줄을 등록했고, 요청에는 `CRON_SECRET` Bearer 토큰을 확인하도록 했습니다. 외부 API 응답이 없거나 날짜가 맞지 않으면 Firebase를 덮어쓰지 않고 상태 메시지를 반환하며, 로컬 확인을 위해 `force=true` 옵션도 둘 수 있도록 했습니다.
+
+### 4. Firebase 기반 리뷰와 이미지 처리
+
+식당 상세 모달을 열 때 `reviews/{restaurantId}`를 `onValue`로 구독해 리뷰를 실시간으로 읽습니다. 닉네임·메뉴·별점·한 줄 평을 저장하고, 메뉴별 평균을 다시 계산해 메뉴 목록에 표시합니다. 리뷰 사진은 최대 1600px 크기의 JPEG로 브라우저에서 먼저 압축한 뒤 Firebase Storage의 `reviews/{restaurantId}` 경로에 업로드하고, 내려받은 URL을 Realtime Database 리뷰 데이터에 함께 저장합니다.
+
+### 5. 실시간 방과 식당 고르기
+
+`/room/[roomId]`에서는 Firebase Realtime Database의 `rooms/{roomId}` 아래에 참여자, 선택 식당, 룰렛 이벤트, 게임 상태를 저장합니다. 참여자가 들어오면 `onDisconnect`를 등록해 연결이 끊겼을 때 자동으로 목록에서 제거하고, 공유 링크를 통해 같은 방의 상태를 실시간으로 확인할 수 있도록 했습니다.
+
+룰렛은 한 명이 고른 결과를 `spinEvent`로 기록해 다른 참여자의 화면에서도 같은 식당이 선택되도록 했습니다. 추가로 참여자 순서를 섞어 진행하는 악어 이빨 내기 게임도 같은 방 상태에 저장해 구현했습니다.
+
+### 6. 화면 구성과 성능 처리
+
+메인 화면은 식당 목록 사이드바와 Kakao Maps 영역으로 나누고, 모바일에서는 사이드바를 아래에서 끌어올리는 형태로 사용할 수 있게 했습니다. 지도·룰렛·협업 방의 브라우저 전용 컴포넌트는 `dynamic import`와 `ssr: false`로 분리해 초기 렌더링 부담을 줄였습니다. 식당 카드와 목록은 `memo`와 `useMemo`를 사용해 검색·정렬 시 필요한 범위만 다시 계산하도록 구성했습니다.
+
+## 기술 스택
+
+- **Frontend**: Next.js, React, TypeScript, Tailwind CSS, shadcn/ui
+- **지도**: Kakao Maps JavaScript SDK
+- **Backend**: Next.js Route Handlers (`/api/restaurants`, `/api/cron/kbabsang`)
+- **Data**: `restaurants.json`, Firebase Realtime Database, Firebase Storage
+- **외부 연동**: RapidAPI Instagram Scraper, 네이버 지도 링크
+- **Automation**: Vercel Cron Jobs
+- **Deployment**: Vercel
