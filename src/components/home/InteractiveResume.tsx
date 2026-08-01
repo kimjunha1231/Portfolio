@@ -89,7 +89,7 @@ export default function InteractiveResume() {
                 </h4>
                 <span className="text-xs font-mono text-foreground/70 bg-foreground/5 px-2.5 py-1 rounded-full border border-card-border">2025.11 ~ 2025.12</span>
               </div>
-              <p className="text-xs md:text-sm font-mono text-accent-blue/90 mb-2.5 font-bold">Next.js 15, TypeScript, React Hook Form, TanStack Query, Zustand, Gemini API, Supabase</p>
+              <p className="text-xs md:text-sm font-mono text-accent-blue/90 mb-2.5 font-bold">Next.js, TypeScript, React Hook Form, TanStack Query, Zustand, Gemini API, Supabase</p>
               <p className="text-sm font-normal text-foreground/90 leading-relaxed mb-4">
                채용 공고와 지원 현황, 자기소개서, PDF 변환, AI 면접 질문 생성을 하나의 흐름으로 연결한 취업 준비 관리 서비스입니다.
              </p>
@@ -308,32 +308,42 @@ export default function InteractiveResume() {
              <span>기술 스택</span>
            </h3>
          </div>
-         <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-3 gap-4">
-           {/* 1. Language */}
+         <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+           {/* 1. Frontend */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Language</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Frontend</span>
               <div className="flex flex-wrap gap-1.5">
-               {["HTML", "CSS", "JavaScript", "TypeScript", "Java", "Dart"].map(tech => (
+               {["HTML", "CSS", "JavaScript", "TypeScript", "React", "Next.js", "Flutter", "Dart", "Styled-components", "Tailwind CSS", "Zustand", "TanStack Query", "Riverpod"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>
            </div>
 
-           {/* 2. Core Frameworks & Libraries */}
+           {/* 2. Backend */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Core Frameworks & Libraries</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Backend</span>
               <div className="flex flex-wrap gap-1.5">
-               {["React", "Next.js", "Flutter", "Spring Boot"].map(tech => (
+               {["Java", "Spring Boot", "Thymeleaf", "MyBatis"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>
            </div>
 
-           {/* 3. Other */}
+           {/* 3. BaaS / Cloud Services */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Other</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">BaaS / Cloud Services</span>
               <div className="flex flex-wrap gap-1.5">
-               {["Styled-components", "Tailwind CSS", "Zustand", "TanStack Query", "Riverpod"].map(tech => (
+               {["Firebase", "Supabase"].map(tech => (
+                  <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
+               ))}
+              </div>
+           </div>
+
+           {/* 4. Database & Infra */}
+           <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Database &amp; Infra</span>
+              <div className="flex flex-wrap gap-1.5">
+               {["Oracle", "Redis"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>

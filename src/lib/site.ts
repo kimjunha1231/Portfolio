@@ -35,11 +35,17 @@ export const TECHNICAL_TOPICS = [
   "Next.js",
   "Flutter",
   "Spring Boot",
+  "Thymeleaf",
+  "MyBatis",
   "Styled-components",
   "Tailwind CSS",
   "Zustand",
   "TanStack Query",
-  "Riverpod"
+  "Riverpod",
+  "Oracle",
+  "Firebase",
+  "Supabase",
+  "Redis"
 ];
 
 export function absoluteUrl(pathname = "/") {
