@@ -41,7 +41,7 @@ export default async function BlogListPage({ searchParams }: BlogListPageProps) 
   const selectedSection = BLOG_SECTIONS.some((section) => section.key === requestedSection)
     ? requestedSection
     : "all";
-  const posts = getAllPosts("blog");
+  const posts = getAllPosts("blog").filter((post) => post.published);
   const visiblePosts = selectedSection === "all"
     ? posts
     : posts.filter((post) => post.section === SECTION_LABELS[selectedSection]);

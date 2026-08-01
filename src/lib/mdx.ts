@@ -25,6 +25,7 @@ export interface MDXPost {
   title: string;
   date: string;
   lastModified: string;
+  published: boolean;
   section?: string;
   category?: string;
   projectCategory?: string;
@@ -155,6 +156,7 @@ function parsePostData(slug: string, fileContent: string, filePath?: string): MD
     lastModified: filePath
       ? getAutomaticLastModified(filePath, frontmatterLastModified)
       : frontmatterLastModified,
+    published: data.published !== false,
     section: typeof data.section === "string" ? data.section : "",
     category: data.category || "",
     projectCategory:
