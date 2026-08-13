@@ -237,11 +237,11 @@ export default function InteractiveResume() {
          <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
            {[
              { title: "2024 클라우드 아이디어 공모전 대상", org: "부산광역시장상", date: "2024.12.24" },
-             { title: "2024 한이음 ICT멘토링 공모전 은상", org: "정보통신기획평가원장상", date: "2024.12.04" },
-             { title: "2025 한이음 드림업 공모전 장려상", org: "한국정보산업연합회장상", date: "2025.11.19" },
-             { title: "숭실 발명아이디어 경진대회 최우수상", org: "숭실대학교 총장상", date: "2024.11.22" },
-             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", date: "2025.10.01" },
-             { title: "Pre-스타트업 창업경진대회 창업아이템 최종 선정", org: "창업 사무실 입주", date: "2025.05.27" }
+             { title: "2024 한이음 ICT멘토링 공모전 은상", org: "정보통신기획평가원장상", host: "과학기술정보통신부/정보통신기획평가원", date: "2024.12.04" },
+             { title: "2025 한이음 드림업 공모전 장려상", org: "한국정보산업연합회장상", host: "과학기술정보통신부/한국정보산업연합회", date: "2025.11.19" },
+             { title: "숭실 발명아이디어 경진대회 최우수상", org: "숭실대학교 총장상", host: "숭실대학교", date: "2024.11.22" },
+             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", host: "숭실대학교", date: "2025.10.01" },
+             { title: "Pre-스타트업 창업경진대회 창업아이템 최종 선정", org: "창업 사무실 입주", host: "숭실대학교 캠퍼스타운", date: "2025.05.27" }
            ]
              // 날짜를 기준으로 최신순 정렬 (Desc)
              .sort((a, b) => new Date(b.date.replace(/\./g, "-")).getTime() - new Date(a.date.replace(/\./g, "-")).getTime())
@@ -250,7 +250,7 @@ export default function InteractiveResume() {
                  <CheckCircle2 className="w-4 h-4 text-accent-blue shrink-0 mt-0.5" />
                   <div className="text-sm leading-snug">
                     <p className="font-semibold text-foreground text-sm">{award.title}</p>
-                    <p className="text-xs text-foreground/70 mt-1 font-normal">{award.org} | {award.date}</p>
+                    <p className="text-xs text-foreground/70 mt-1 font-normal">{award.org}{award.host ? ` | 주최: ${award.host}` : ""} | {award.date}</p>
                  </div>
                </div>
              ))}
