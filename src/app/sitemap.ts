@@ -7,8 +7,8 @@ import {
 } from "@/lib/site";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const blogPosts = getAllPosts("blog");
-  const projects = getAllPosts("projects");
+  const blogPosts = getAllPosts("blog").filter((post) => post.published);
+  const projects = getAllPosts("projects").filter((project) => project.published);
   const latestSiteUpdate = getLatestLastModified(
     [...blogPosts, ...projects, { lastModified: SITE_LAST_MODIFIED }],
     SITE_LAST_MODIFIED,

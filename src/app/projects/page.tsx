@@ -55,7 +55,7 @@ function getFilterHref(current: ProjectFilters, updates: Partial<ProjectFilters>
 
 export default async function ProjectsListPage({ searchParams }: ProjectsListPageProps) {
   const params = await searchParams;
-  const posts = getAllPosts("projects");
+  const posts = getAllPosts("projects").filter((post) => post.published);
   const requestedSection = getSearchParam(params.section) || "featured";
   const selectedSection = requestedSection === "side" ? "side" : "featured";
   const requestedRole = getSearchParam(params.role) || "all";

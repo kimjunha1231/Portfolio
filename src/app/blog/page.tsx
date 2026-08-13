@@ -38,10 +38,16 @@ export const metadata: Metadata = {
 export default async function BlogListPage({ searchParams }: BlogListPageProps) {
   const params = await searchParams;
   const requestedSection = typeof params.section === "string" ? params.section : "all";
-  const selectedSection = BLOG_SECTIONS.some((section) => section.key === requestedSection)
+  const posts = getAllPosts("blog").filter((post) => post.published);
+  const hasPublishedPostsInSection = (sectionKey: string) =>
+    sectionKey === "all" || posts.some((post) => post.section === SECTION_LABELS[sectionKey]);
+  const availableSections = BLOG_SECTIONS.filter((section) =>
+    hasPublishedPostsInSection(section.key),
+  );
+  const selectedSection = BLOG_SECTIONS.some((section) => section.key === requestedSection) &&
+    hasPublishedPostsInSection(requestedSection)
     ? requestedSection
     : "all";
-  const posts = getAllPosts("blog").filter((post) => post.published);
   const visiblePosts = selectedSection === "all"
     ? posts
     : posts.filter((post) => post.section === SECTION_LABELS[selectedSection]);
@@ -108,7 +114,7 @@ export default async function BlogListPage({ searchParams }: BlogListPageProps) 
                 Section
               </span>
               <nav aria-label="블로그 분류" className="flex flex-wrap gap-1.5">
-                {BLOG_SECTIONS.map((section) => {
+                {availableSections.map((section) => {
                   const isSelected = section.key === selectedSection;
                   const href = section.key === "all" ? "/blog" : `/blog?section=${section.key}`;
 
