@@ -240,7 +240,8 @@ export default function InteractiveResume() {
              { title: "2024 한이음 ICT멘토링 공모전 은상", org: "정보통신기획평가원장상", date: "2024.12.04" },
              { title: "2025 한이음 드림업 공모전 장려상", org: "한국정보산업연합회장상", date: "2025.11.19" },
              { title: "숭실 발명아이디어 경진대회 최우수상", org: "숭실대학교 총장상", date: "2024.11.22" },
-             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", date: "2025.10.01" }
+             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", date: "2025.10.01" },
+             { title: "Pre-스타트업 창업경진대회 창업아이템 최종 선정", org: "창업 사무실 입주", date: "2025.05.27" }
            ]
              // 날짜를 기준으로 최신순 정렬 (Desc)
              .sort((a, b) => new Date(b.date.replace(/\./g, "-")).getTime() - new Date(a.date.replace(/\./g, "-")).getTime())
