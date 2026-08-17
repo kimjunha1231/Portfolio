@@ -1,5 +1,5 @@
 ---
-title: "칸반보드 렌더링 최적화"
+title: "칸반보드 리렌더링 최적화: dnd-kit에서 @hello-pangea/dnd로 전환한 이유"
 date: "2026-07-26"
 lastModified: "2026-08-12"
 published: true
@@ -9,10 +9,10 @@ tags: ["React", "Rendering", "Performance", "React.memo", "Context", "dnd-kit", 
 cover: "/images/blog/dnd-kit-rendering-boundaries.png"
 coverAlt: "칸반보드의 드래그 상태와 카드 콘텐츠를 서로 다른 렌더링 경계로 나눈 구조도"
 coverFit: "contain"
-description: "JobSecretary 칸반보드에서 카드 하나를 드래그할 때 영향을 받지 않은 카드까지 다시 렌더링되던 문제를 추적하고, Context 구독 범위와 컴포넌트 경계를 조정해 개선한 과정을 정리합니다."
+description: "React dnd-kit 기반 JobSecretary 칸반보드에서 카드 하나를 드래그할 때 영향을 받지 않은 카드까지 리렌더링되던 원인을 분석했습니다. Context 구독 범위와 컴포넌트 경계를 조정하고 @hello-pangea/dnd로 전환한 뒤 리렌더링 범위의 변화를 비교합니다."
 ---
 
-JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 때마다 모든 카드가 리렌더링되던 문제를 해결한 과정이다.
+JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 때마다 모든 카드가 리렌더링되던 원인을 분석하고, 컴포넌트 구조와 DnD 라이브러리를 변경한 과정이다.
 
 ## 문제를 발견한 순간
 
