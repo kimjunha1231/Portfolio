@@ -2,7 +2,6 @@ import type { MetadataRoute } from "next";
 import { getAllPosts, getLatestLastModified } from "@/lib/mdx";
 import { getAllVideos } from "@/lib/videos";
 import {
-  absoluteUrl,
   formatDateForSitemap,
   SITE_LAST_MODIFIED,
   SITE_URL,
@@ -50,16 +49,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...getAllVideos().map((video) => ({
       url: new URL(`/videos/${video.slug}`, SITE_URL).toString(),
       lastModified: formatDateForSitemap(video.uploadDate) ?? SITE_LAST_MODIFIED,
-      videos: [
-        {
-          title: video.title,
-          thumbnail_loc: absoluteUrl(video.thumbnail),
-          description: video.description,
-          content_loc: absoluteUrl(video.src),
-          duration: video.durationSeconds,
-          publication_date: video.uploadDate,
-        },
-      ],
     })),
   ];
 }

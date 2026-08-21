@@ -98,6 +98,12 @@ expectSource("src/app/sitemap.ts", sitemap, /getAllPosts\("projects"\)/, "프로
 expectSource("src/app/sitemap.ts", sitemap, /projects\.map\(/, "개별 프로젝트 URL이 sitemap에 생성되지 않습니다.", "projects.map으로 /projects/[slug] URL을 추가하세요.");
 expectSource("src/app/sitemap.ts", sitemap, /blogPosts\.map\(/, "개별 블로그 URL이 sitemap에 생성되지 않습니다.", "blogPosts.map으로 /blog/[slug] URL을 추가하세요.");
 expectSource("src/app/sitemap.ts", sitemap, /formatDateForSitemap/, "sitemap의 콘텐츠 수정일을 검증하지 않습니다.", "각 URL에 formatDateForSitemap(lastModified)를 사용하세요.");
+if (/\bvideos:\s*\[/.test(sitemap)) {
+  fail("src/app/sitemap.ts", "네이버 제출용 sitemap에 Google video 확장 태그가 섞여 있습니다.", "video sitemap은 /video-sitemap.xml로 분리하고 기본 sitemap은 표준 URL 목록만 유지하세요.");
+}
+
+const videoSitemap = read("src/app/video-sitemap.xml/route.ts");
+expectSource("src/app/video-sitemap.xml/route.ts", videoSitemap, /sitemap-video\/1\.1/, "Google video sitemap 네임스페이스가 없습니다.", "Google용 video sitemap을 별도 XML 응답으로 유지하세요.");
 
 for (const [kind, route] of [["blog", "src/app/blog/[slug]/page.tsx"], ["projects", "src/app/projects/[slug]/page.tsx"]]) {
   const source = read(route);
