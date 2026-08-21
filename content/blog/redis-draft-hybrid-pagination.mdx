@@ -15,22 +15,9 @@ description: "스마트 메시징 시스템에서 여러 검색 결과를 오가
 
 실제 수신자 선택 화면은 다음 영상에서 확인할 수 있습니다.
 
-<figure className="not-prose">
-  <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
-    <video
-      muted
-      loop
-      playsInline
-      controls
-      preload="metadata"
-      aria-label="스마트 메시징 시스템의 수신자 선택 화면"
-      className="aspect-video w-full object-contain"
-    >
-      <source src="/videos/references/redis-reference-upscaled.mp4" type="video/mp4" />
-    </video>
-  </div>
-  <figcaption>수신자 선택 화면</figcaption>
-</figure>
+<div className="not-prose">
+  <VideoLink slug="redis-reference-upscaled" caption="수신자 선택 화면" />
+</div>
 
 이번 프로젝트에서는 Redis를 단순 캐시가 아니라 **발송 준비 과정에서만 사용하는 임시 선택 저장소**로 사용했습니다. 브라우저에는 전체 고객 ID를 보관하지 않고 `draftId`만 전달하고, Redis에는 선택된 고객 ID와 처리 상태를 저장했습니다. 고객의 상세 정보와 필터 검색은 기존 Oracle 조회를 사용하고, 선택 목록의 순서와 페이지 범위는 Redis가 담당하도록 역할을 나눴습니다.
 

@@ -175,7 +175,9 @@ function parsePostData(slug: string, fileContent: string, filePath?: string): MD
 }
 
 export const getPostSlugs = (type: "blog" | "projects") =>
-  getAllPosts(type).map((post) => post.slug);
+  getAllPosts(type)
+    .filter((post) => post.published)
+    .map((post) => post.slug);
 
 export function toCleanMarkdown(post: MDXPost) {
   return `# ${post.title}

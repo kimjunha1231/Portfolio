@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { estimateTokens, toRawMarkdown, type MDXPost } from "@/lib/mdx";
 import {
+  formatVideoDuration,
+  type SiteVideo,
+} from "@/lib/videos";
+import {
   absoluteUrl,
   GITHUB_URL,
   LINKEDIN_URL,
@@ -145,6 +149,81 @@ export function getContentStructuredData(
           "@type": "ListItem",
           position: 3,
           name: post.title,
+          item: canonicalUrl,
+        },
+      ],
+    },
+  ];
+}
+
+export function getVideoCanonicalUrl(video: SiteVideo) {
+  return new URL(`/videos/${video.slug}`, SITE_URL).toString();
+}
+
+export function getVideoMetadata(video: SiteVideo): Metadata {
+  const canonicalUrl = getVideoCanonicalUrl(video);
+  const thumbnailUrl = absoluteUrl(video.thumbnail);
+
+  return {
+    title: video.title,
+    description: video.description,
+    alternates: { canonical: canonicalUrl },
+    openGraph: {
+      title: video.title,
+      description: video.description,
+      type: "website",
+      url: canonicalUrl,
+      siteName: SITE_NAME,
+      images: [{ url: thumbnailUrl, alt: video.title }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: video.title,
+      description: video.description,
+      images: [thumbnailUrl],
+    },
+  };
+}
+
+export function getVideoStructuredData(video: SiteVideo) {
+  const canonicalUrl = getVideoCanonicalUrl(video);
+  const videoUrl = absoluteUrl(video.src);
+
+  return [
+    {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      "@id": `${canonicalUrl}#video`,
+      name: video.title,
+      description: video.description,
+      thumbnailUrl: [absoluteUrl(video.thumbnail)],
+      uploadDate: formatDateForSchema(video.uploadDate),
+      duration: formatVideoDuration(video.durationSeconds),
+      contentUrl: videoUrl,
+      mainEntityOfPage: canonicalUrl,
+      isFamilyFriendly: true,
+      publisher: { "@id": `${SITE_URL.toString()}#person` },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "홈",
+          item: SITE_URL.toString(),
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "동영상",
+          item: absoluteUrl("/videos"),
+        },
+        {
+          "@type": "ListItem",
+          position: 3,
+          name: video.title,
           item: canonicalUrl,
         },
       ],

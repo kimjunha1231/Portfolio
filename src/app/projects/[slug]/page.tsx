@@ -14,6 +14,7 @@ import {
 import { PERSON_NAME } from "@/lib/site";
 import CopyMarkdownButton from "@/components/shared/CopyMarkdownButton";
 import StructuredData from "@/components/shared/StructuredData";
+import VideoLink from "@/components/shared/VideoLink";
 import ZoomableImage from "@/components/shared/ZoomableImage";
 import {
   PROJECT_PLATFORM_LABELS,
@@ -36,7 +37,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const project = getPostBySlug("projects", slug);
 
-  if (!project) {
+  if (!project || !project.published) {
     notFound();
   }
 
@@ -47,7 +48,7 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
   const { slug } = await params;
   const project = getPostBySlug("projects", slug);
 
-  if (!project) {
+  if (!project || !project.published) {
     notFound();
   }
 
@@ -166,7 +167,7 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
         <MDXRemote
           source={project.content}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
-          components={{ img: ZoomableImage, ZoomableImage }}
+          components={{ img: ZoomableImage, VideoLink, ZoomableImage }}
         />
       </div>
 

@@ -54,6 +54,14 @@ const nextConfig: NextConfig = {
         source: "/blog/:slug",
         headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
       },
+      {
+        source: "/videos",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/videos/:slug",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
     ];
   },
 };

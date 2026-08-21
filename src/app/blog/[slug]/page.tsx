@@ -15,6 +15,7 @@ import {
 import { PERSON_NAME } from "@/lib/site";
 import CopyMarkdownButton from "@/components/shared/CopyMarkdownButton";
 import StructuredData from "@/components/shared/StructuredData";
+import VideoLink from "@/components/shared/VideoLink";
 import ZoomableImage from "@/components/shared/ZoomableImage";
 
 interface BlogPostPageProps {
@@ -33,7 +34,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const post = getPostBySlug("blog", slug);
 
-  if (!post) {
+  if (!post || !post.published) {
     notFound();
   }
 
@@ -44,7 +45,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
   const { slug } = await params;
   const post = getPostBySlug("blog", slug);
 
-  if (!post) {
+  if (!post || !post.published) {
     notFound();
   }
 
@@ -118,7 +119,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
         <MDXRemote
           source={post.content}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
-          components={{ ZoomableImage }}
+          components={{ VideoLink, ZoomableImage }}
         />
       </div>
 
