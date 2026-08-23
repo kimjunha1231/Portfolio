@@ -1,4 +1,9 @@
-import { estimateTokens, getAllPosts, toRawMarkdown } from "@/lib/mdx";
+import {
+  estimateTokens,
+  getAllPosts,
+  toRawMarkdown,
+  type ContentGeo,
+} from "@/lib/mdx";
 import {
   CONTACT_EMAIL,
   GITHUB_URL,
@@ -17,12 +22,14 @@ function getContentIndexMetadata(post: {
   lastModified: string;
   category?: string;
   tags?: string[];
+  geo?: ContentGeo;
 }) {
   return [
     `게시일: ${post.date}`,
     `최종 업데이트: ${post.lastModified}`,
     post.category ? `분류: ${post.category}` : "",
     post.tags?.length ? `태그: ${post.tags.join(", ")}` : "",
+    post.geo ? `지역: ${post.geo.name}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -96,6 +103,7 @@ export function getLlmsFullText() {
       `- URL: ${absoluteUrl(`/projects/${project.slug}`)}`,
       `- Published: ${project.date}`,
       `- Last modified: ${project.lastModified}`,
+      ...(project.geo ? [`- Service area: ${project.geo.name}`] : []),
       `- Estimated tokens: ${estimateTokens(toRawMarkdown(project))}`,
       "",
       toRawMarkdown(project),

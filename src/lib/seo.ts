@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { estimateTokens, toRawMarkdown, type MDXPost } from "@/lib/mdx";
+import { estimateTokens, toRawMarkdown, type ContentGeo, type MDXPost } from "@/lib/mdx";
 import {
   formatVideoDuration,
   type SiteVideo,
@@ -33,6 +33,31 @@ function getContentImage(post: MDXPost) {
   return post.cover ? absoluteUrl(post.cover) : absoluteUrl(SOCIAL_IMAGE_PATH);
 }
 
+function getGeoPlace(geo: ContentGeo) {
+  return {
+    "@type": "Place",
+    name: geo.name,
+    ...(geo.region || geo.country
+      ? {
+          address: {
+            "@type": "PostalAddress",
+            ...(geo.region ? { addressRegion: geo.region } : {}),
+            ...(geo.country ? { addressCountry: geo.country } : {}),
+          },
+        }
+      : {}),
+    ...(typeof geo.latitude === "number" && typeof geo.longitude === "number"
+      ? {
+          geo: {
+            "@type": "GeoCoordinates",
+            latitude: geo.latitude,
+            longitude: geo.longitude,
+          },
+        }
+      : {}),
+  };
+}
+
 export function getContentCanonicalUrl(post: MDXPost, kind: ContentKind) {
   return new URL(`/${kind === "blog" ? "blog" : "projects"}/${post.slug}`, SITE_URL).toString();
 }
@@ -47,6 +72,15 @@ export function getContentMetadata(
   const keywords = getContentKeywords(post);
   const image = getContentImage(post);
   const section = post.category;
+  const geoHints = post.geo
+    ? {
+        "geo.placename": post.geo.name,
+        ...(post.geo.region ? { "geo.region": post.geo.region } : {}),
+        ...(typeof post.geo.latitude === "number" && typeof post.geo.longitude === "number"
+          ? { "geo.position": `${post.geo.latitude};${post.geo.longitude}` }
+          : {}),
+      }
+    : {};
 
   return {
     title: post.title,
@@ -81,10 +115,24 @@ export function getContentMetadata(
       description,
       images: [image],
     },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+        "max-video-preview": -1,
+      },
+    },
     other: {
       "ai-content-format": "markdown",
       "ai-content-url": rawUrl,
       "ai-token-count": String(estimateTokens(toRawMarkdown(post))),
+      "ai-summary": description,
+      "ai-keywords": keywords?.join(", ") || "",
+      ...geoHints,
     },
   };
 }
@@ -120,6 +168,12 @@ export function getContentStructuredData(
     isPartOf: { "@id": `${SITE_URL.toString()}#website` },
     ...(post.category ? { articleSection: post.category } : {}),
     ...(keywords ? { keywords } : {}),
+    ...(post.geo
+      ? {
+          contentLocation: getGeoPlace(post.geo),
+          spatialCoverage: getGeoPlace(post.geo),
+        }
+      : {}),
     wordCount: estimateWordCount(post.content),
     inLanguage: "ko-KR",
   };

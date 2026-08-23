@@ -20,6 +20,14 @@ type LastModifiedCacheEntry = {
 
 const lastModifiedCache = new Map<string, LastModifiedCacheEntry>();
 
+export interface ContentGeo {
+  name: string;
+  region?: string;
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface MDXPost {
   slug: string;
   title: string;
@@ -38,6 +46,7 @@ export interface MDXPost {
   coverFit?: "cover" | "contain";
   githubUrl?: string;
   demoUrl?: string;
+  geo?: ContentGeo;
   content: string;
 }
 
@@ -68,6 +77,26 @@ function parseProjectRole(value: unknown): ProjectRole | undefined {
   return typeof value === "string" && PROJECT_ROLES.includes(value as ProjectRole)
     ? (value as ProjectRole)
     : undefined;
+}
+
+function parseContentGeo(value: unknown): ContentGeo | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+
+  const data = value as Record<string, unknown>;
+  if (typeof data.name !== "string" || data.name.trim() === "") return undefined;
+
+  const parseCoordinate = (coordinate: unknown) =>
+    typeof coordinate === "number" && Number.isFinite(coordinate)
+      ? coordinate
+      : undefined;
+
+  return {
+    name: data.name,
+    region: typeof data.region === "string" ? data.region : undefined,
+    country: typeof data.country === "string" ? data.country : undefined,
+    latitude: parseCoordinate(data.latitude),
+    longitude: parseCoordinate(data.longitude),
+  };
 }
 
 function formatFileDate(filePath: string) {
@@ -170,6 +199,7 @@ function parsePostData(slug: string, fileContent: string, filePath?: string): MD
     coverFit: parseCoverFit(data.coverFit),
     githubUrl: typeof data.githubUrl === "string" ? data.githubUrl : "",
     demoUrl: typeof data.demoUrl === "string" ? data.demoUrl : "",
+    geo: parseContentGeo(data.geo),
     content,
   };
 }
@@ -223,6 +253,7 @@ export function toRawMarkdown(post: MDXPost) {
     ...(post.coverFit ? [`coverFit: ${JSON.stringify(post.coverFit)}`] : []),
     ...(post.githubUrl ? [`githubUrl: ${JSON.stringify(post.githubUrl)}`] : []),
     ...(post.demoUrl ? [`demoUrl: ${JSON.stringify(post.demoUrl)}`] : []),
+    ...(post.geo ? [`geo: ${JSON.stringify(post.geo)}`] : []),
     ...(post.description
       ? [`description: ${JSON.stringify(post.description)}`]
       : []),
