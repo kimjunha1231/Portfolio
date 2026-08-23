@@ -43,7 +43,7 @@ export default function Header() {
       ref={headerRef}
       className="w-full py-6 px-6 md:px-12 lg:px-24 border-b border-card-border/40 bg-background/60 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300"
     >
-      <div className="w-full max-w-7xl mx-auto flex items-center justify-between">
+      <div className="relative w-full max-w-7xl mx-auto flex items-center justify-between">
         {/* 1. 로고 이미지 심볼 (클릭 시 홈으로 이동) */}
         <Link href="/" className="flex items-center group cursor-pointer" aria-label="Home">
           <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-[#fcfbfa] border border-card-border flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-105 shadow-sm">
@@ -59,7 +59,7 @@ export default function Header() {
         </Link>
 
         {/* 2. 중앙 네비게이션 메뉴바 */}
-        <nav className="glass-panel rounded-full px-6 py-2.5 flex items-center gap-6 text-xs font-mono uppercase tracking-[0.1em]">
+        <nav className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 glass-panel rounded-full px-6 py-2.5 flex items-center gap-6 text-xs font-mono uppercase tracking-[0.1em]">
           <Link href="/" className="hover:text-accent-blue transition-colors">이력서</Link>
           <Link href="/projects" className="hover:text-accent-blue transition-colors">프로젝트</Link>
           <Link href="/blog" className="hover:text-accent-blue transition-colors">블로그</Link>
