@@ -4,27 +4,27 @@ category: "Full Stack / 개인 프로젝트"
 projectCategory: "식사 정보"
 platforms: ["web"]
 role: "fullstack"
-tags: ["Next.js", "TypeScript", "Firebase", "Kakao Maps", "RapidAPI", "Vercel Cron"]
+tags: ["Next.js", "TypeScript", "Firebase", "Kakao Maps", "RapidAPI", "Vercel Cron", "SEO", "AEO", "GEO"]
 cover: "/images/projects/sikdae-kosa.png"
 coverAlt: "식권대장 KOSA 대시보드의 식당 목록과 지도 화면"
 githubUrl: "https://github.com/kimjunha1231/sikdae-kosa"
 demoUrl: "https://sikdae-kosa.vercel.app/"
 date: "2026-06-23"
 lastModified: "2026-08-23"
-description: "식당 정보 조회에서 시작해 교육생 요청을 바탕으로 Firebase 실시간 식당 선택, 룰렛, 게임과 Vercel Cron 기반 K밥상 메뉴 자동 갱신까지 확장한 서비스입니다."
+description: "송파 IT벤처타워 주변 84개 식당의 메뉴와 가격을 정적 데이터로 관리하고, Firebase 실시간 협업과 Vercel Cron 기반 K밥상 메뉴 갱신을 제공하는 식사 정보 서비스입니다."
 ---
 
 ## 프로젝트 개요
 
 현대퓨처넷 채용연계형 MSA 기반 Full Stack 개발 전문가 양성과정에 참여하면서 식권대장 앱을 사용했다. 메뉴 이름과 가격, 이미지를 한 번에 보기 어려웠고 매장 정보도 따로 찾아야 했다. 그래서 Next.js로 송파 IT벤처타워 주변 식당 데이터를 정리하고, 교육생들이 점심 메뉴를 확인하는 데 필요한 기능을 한 화면에 모았다.
 
-처음에는 식당 정보를 조회하는 서비스였다. 이후 교육생들이 여러 명이 동시에 식당을 고르고, 룰렛과 게임으로 점심 장소를 정하고 싶다는 요청을 받았다. 이 요청을 반영해 Firebase Realtime Database를 도입하고 참여자, 선택 식당, 룰렛 결과, 게임 상태를 공유하는 실시간 방을 만들었다. 매일 오전 10시에서 11시 사이에 게시되는 K밥상 메뉴도 사용자가 직접 확인하지 않아도 되도록 GitHub Actions에서 Vercel Cron으로 자동 갱신 방식을 바꿨다.
+처음에는 식당 정보를 조회하는 서비스였다. 이후 교육생들이 여러 명이 동시에 식당을 고르고, 룰렛과 게임으로 점심 장소를 정하고 싶다는 요청을 받았다. 이 요청을 반영해 Firebase Realtime Database를 도입하고 참여자, 선택 식당, 룰렛 결과, 게임 상태를 공유하는 실시간 방을 만들었다. 매일 오전 10시에서 11시 사이에 게시되는 K밥상 메뉴는 사용자가 직접 확인하지 않아도 되도록 Vercel Cron으로 자동 갱신했다. 식당 정보가 잘못되었을 때 바로 알려줄 수 있도록 문의하기 버튼도 추가했다.
 
 - **구분**: 개인 프로젝트 (1인 개발)
 - **기간**: 2026.06
 - **담당 범위**: 기획, 데이터 모델링, API, 화면 구성, Firebase 연동, 자동화, 배포
 - **초기 데이터**: 송파 IT벤처타워 주변 식당 84개
-- **확장 범위**: 실시간 식당 선택, 룰렛, 게임, K밥상 메뉴 자동 갱신
+- **확장 범위**: 실시간 식당 선택, 룰렛, 게임, K밥상 메뉴 자동 갱신, 정보 제보
 - **배포**: Vercel
 - **서비스**: [sikdae-kosa.vercel.app](https://sikdae-kosa.vercel.app/)
 
@@ -37,30 +37,33 @@ description: "식당 정보 조회에서 시작해 교육생 요청을 바탕으
 - **식당 선택 룰렛**: 2km 이내 식당이나 직접 고른 식당만 후보로 두고, 오늘 갈 식당을 무작위로 추천한다.
 - **실시간 방 만들기**: 공유 링크로 방에 들어와 참여자, 선택 식당, 룰렛 결과를 함께 확인한다.
 - **K밥상 메뉴 자동 반영**: RapidAPI Instagram Scraper에서 최신 게시물을 가져온 뒤 당일 메뉴인지 확인하고 Firebase에 저장한다.
+- **정보 제보와 문의**: 식당이나 메뉴, 가격에 문제가 있을 때 `rlawnsgk0610@gmail.com`으로 바로 문의할 수 있다.
 
 ## 구현 구조
 
 ### 1. 식당 데이터와 API 구성
 
-기본 식당 정보는 `src/data/restaurants.json`에 저장하고, `/api/restaurants`에서 목록을 읽어 클라이언트에 전달했다. `Restaurant` 타입에는 식당명, 카테고리, 좌표, 영업시간, 네이버 링크, 메뉴 배열을 담았다. 목록 조회뿐 아니라 식당 추가, 수정, 삭제를 위한 `POST`, `PUT`, `DELETE`도 같은 API에 구현했다.
+기본 식당 정보와 메뉴, 가격은 `src/data/restaurants.json`에 정적 데이터로 관리한다. `/api/restaurants`는 이 파일을 읽어 목록과 상세 데이터를 제공하는 읽기 전용 API다. `Restaurant` 타입에는 식당명, 카테고리, 좌표, 영업시간, 네이버 링크, 메뉴 배열을 담았다.
 
-`GET /api/restaurants`에서는 Firebase Realtime Database의 리뷰와 K밥상 데이터를 병렬로 읽는다. Firebase 연결이 실패하거나 설정되지 않아도 기본 JSON 데이터는 먼저 보여주고, 외부 호출에는 2초 타임아웃을 둔다. 리뷰가 있으면 식당별 평균 평점과 리뷰 개수를 목록에 합쳐 반환한다.
+목록 요청에는 메뉴 이미지를 제외한 요약 데이터를 반환하고, 상세 요청에는 전체 메뉴 이미지를 포함한다. 두 응답에는 Firebase Realtime Database의 리뷰 평점과 K밥상 오늘 메뉴를 함께 반영한다. Firebase 연결이 실패하거나 설정되지 않아도 기본 JSON 데이터는 먼저 보여주며, 외부 호출에는 2초 타임아웃을 둔다. 정적 JSON을 서버에서 직접 수정하는 `POST`, `PUT`, `DELETE` 방식은 Vercel 서버리스 환경과 맞지 않았다. 실제로 호출하는 화면도 없어 관련 메서드는 제거하고, 식당 정보는 소스 데이터를 수정한 뒤 다시 배포하는 방식으로 정리했다.
 
 ### 2. Kakao Maps와 식당 목록 연결
 
 Kakao Maps SDK는 브라우저에서 동적으로 불러오고, 앱 환경변수에 키가 없으면 `localStorage`에 저장한 키를 사용한다. 기준 위치에서 각 식당까지의 거리는 Haversine 공식으로 계산하고, 지도 확대 수준에 따라 가까운 마커를 클라이언트에서 묶어 표시한다. 식당 카테고리별로 지도 마커 색상도 다르게 적용했다.
 
-### 3. GitHub Actions에서 Vercel Cron으로 전환한 K밥상 자동 업데이트
+### 3. Vercel Cron 기반 K밥상 자동 업데이트
 
 K밥상 한식뷔페는 매일 오전 10시에서 11시 사이에 Instagram으로 당일 메뉴를 게시한다. 사용자가 직접 게시물을 확인하지 않아도 서비스에서 오늘의 메뉴를 보려면 게시 이후에 수집 API를 실행해야 했다.
 
-처음에는 GitHub Actions에 일일 스케줄을 등록했다. 하지만 공용 실행 자원을 사용하는 예약 작업은 사용량이 많은 시간대에 대기하면서 설정한 시각보다 늦게 시작되기도 했다. 점심시간 전에 메뉴를 보여줘야 해서, 배포 환경과 가까운 Vercel Cron Jobs로 스케줄링 주체를 바꿨다.
+처음에는 GitHub Actions에 일일 스케줄을 등록했다. 하지만 공용 실행 자원을 사용하는 예약 작업은 설정한 시각보다 늦게 시작될 수 있었다. 점심시간 전에 메뉴를 보여줘야 했기 때문에 예약 실행을 배포 환경과 가까운 Vercel Cron Jobs로 옮겼다.
 
-Vercel Hobby 플랜의 Cron은 하루 한 번 등록할 수 있지만, 실행 시각에는 시간 단위로 최대 59분의 오차가 생길 수 있다. 호출을 한 번만 걸어두면 메뉴가 게시되기 전에 실행되거나 점심시간에 가까워져 갱신될 수 있었다. 이를 보완하려고 `vercel.json`에 KST 기준 10시 40분과 11시 4분에 해당하는 일일 스케줄을 두 개 등록하고, 같은 `/api/cron/kbabsang` 경로를 호출하게 했다. 서로 다른 시간에 확인해 당일 게시물을 수집할 기회를 늘리고, 한 번의 예약 실행 지연이 전체 갱신 지연으로 이어지지 않게 했다.
+메뉴 게시 시각이 매일 조금씩 달라지고 예약 실행에도 오차가 생길 수 있어, `vercel.json`에 KST 기준 10시 40분과 11시 4분에 해당하는 일일 스케줄을 두 개 등록했다. 두 스케줄은 같은 `/api/cron/kbabsang` 경로를 호출한다. 첫 실행이 게시물보다 빨라도 두 번째 실행에서 다시 확인할 수 있도록 했다.
 
 `/api/cron/kbabsang`은 `CRON_SECRET` Bearer 토큰을 확인한 뒤 RapidAPI의 Instagram Scraper로 `kbabsang_official` 피드의 최신 게시물을 가져온다. 게시 시각을 한국 시간으로 바꾼 값과 본문의 날짜 패턴을 차례로 확인하고, 오늘 게시물일 때만 이미지 URL, 게시물 URL, 업데이트 날짜를 Firebase의 `kbabsang/today`에 기록한다. 두 스케줄이 모두 실행되어도 같은 단일 경로를 갱신하므로 중복 데이터가 쌓이지 않는다.
 
 외부 API 응답이 없거나 최신 게시물이 오늘 메뉴가 아니면 Firebase를 덮어쓰지 않고 기존 데이터를 유지한다. 예약 호출이 실패하거나 게시 시각이 늦어도 다음 스케줄에서 다시 확인할 수 있다. 로컬에서 확인할 때는 `force=true` 옵션을 사용할 수 있게 했다.
+
+초기에 있던 수동 전달용 `/api/menu/kbabsang`과 독립 실행 스크립트는 자동화 경로를 `/api/cron/kbabsang`으로 정리하면서 삭제했다. 지금은 Vercel Cron이 이 하나의 서버리스 경로만 호출한다.
 
 ### 4. Firebase 기반 리뷰와 이미지 처리
 
@@ -68,15 +71,21 @@ Vercel Hobby 플랜의 Cron은 하루 한 번 등록할 수 있지만, 실행 �
 
 ### 5. 실시간 방과 식당 고르기
 
-초기 Next.js 구현은 한 명이 식당 정보를 조회하고 룰렛을 돌리는 흐름이었다. 이후 교육생들은 여러 명이 같은 방에 들어와 후보 식당을 함께 고르고, 같은 룰렛 결과와 게임 진행 상태를 보고 싶다고 했다. 짧은 시간 동안 여러 브라우저가 같은 선택 상태를 읽고 바로 반영해야 했기 때문에 Firebase Realtime Database를 실시간 동기화 계층으로 사용했다.
+초기 Next.js 구현은 한 명이 식당 정보를 조회하고 룰렛을 돌리는 흐름이었다. 이후 교육생들은 여러 명이 같은 방에 들어와 후보 식당을 함께 고르고, 같은 룰렛 결과와 게임 진행 상태를 보고 싶다고 했다. 짧은 시간 동안 여러 브라우저가 같은 선택 상태를 읽고 바로 반영해야 했기 때문에 Firebase Realtime Database로 상태를 실시간으로 동기화했다.
 
-`/room/[roomId]`에서는 `rooms/{roomId}` 아래에 참여자, 선택 식당, 룰렛 이벤트, 게임 상태를 저장한다. 참여자가 들어오면 `onDisconnect`를 등록해 연결이 끊겼을 때 목록에서 자동으로 제거한다. 공유 링크를 통해 같은 방의 상태도 실시간으로 확인한다.
+`/room/[roomId]`에서는 `rooms/{roomId}` 아래에 참여자, 선택 식당, 룰렛 이벤트, 게임 상태를 저장한다. 참여자가 들어오면 `onDisconnect`를 등록해 연결이 끊겼을 때 목록에서 자동으로 제거한다. 공유 링크로 같은 방의 상태를 실시간으로 확인한다.
 
-식당 선택은 참여자별 로컬 상태에만 두지 않고 방의 공용 상태에 반영했다. 한 명이 고른 룰렛 결과는 `spinEvent`로 기록해 다른 참여자의 화면에도 같은 식당이 나오게 했다. 참여자 순서를 섞어 진행하는 악어 이빨 내기 게임도 같은 방 상태에 저장했다. 식당 정보 조회 서비스에 여러 교육생이 점심 장소를 함께 정하는 흐름을 더한 셈이다.
+식당 선택은 참여자별 로컬 상태에만 두지 않고 방의 공용 상태에 반영했다. 한 명이 고른 룰렛 결과는 `spinEvent`로 기록해 다른 참여자의 화면에도 같은 식당이 나오게 했다. 참여자 순서를 섞어 진행하는 악어 이빨 내기 게임도 같은 방 상태에 저장했다. 조회만 하던 서비스에 여러 교육생이 점심 장소를 함께 정하는 기능을 더했다.
 
 ### 6. 화면 구성과 성능 처리
 
 메인 화면은 식당 목록 사이드바와 Kakao Maps 영역으로 나눴다. 모바일에서는 사이드바를 아래에서 끌어올려 사용할 수 있다. 지도, 룰렛, 협업 방의 브라우저 전용 컴포넌트는 `dynamic import`와 `ssr: false`로 분리해 초기 렌더링 부담을 줄였다. 식당 카드와 목록은 `memo`와 `useMemo`를 사용해 검색, 정렬할 때 필요한 범위만 다시 계산한다.
+
+### 7. SEO·AEO·GEO를 고려한 정보 구조
+
+검색 엔진과 AI가 서비스의 성격과 지역을 파악할 수 있도록 메타데이터도 정리했다. canonical URL, Open Graph 이미지, `robots.txt`, `sitemap.xml`을 연결하고, 루트 페이지에는 `WebApplication`, `WebSite`, `ItemList` JSON-LD를 추가했다. ItemList에는 식당 이름, 카테고리, 좌표, 네이버 지도 링크를 담아 “송파 IT벤처타워와 가락시장역 주변 점심 식당을 찾는 서비스”라는 설명이 드러나게 했다.
+
+`public/llms.txt`에는 주요 기능, 서비스 지역, 데이터 출처와 한계, 문의 이메일을 정리했다. 기본 식당·메뉴 데이터는 정적 데이터셋이고 리뷰 평점과 K밥상 오늘 메뉴는 별도로 갱신된다는 점을 적었다. 가격과 영업시간은 방문 전에 다시 확인해야 한다는 안내도 넣었다. 최신 정보를 모두 보장하는 것처럼 쓰지 않고 확인 가능한 범위를 밝혀, 검색 결과나 AI 답변이 오래된 정보를 사실처럼 인용할 가능성을 줄였다.
 
 ## 기술 스택
 
@@ -85,5 +94,6 @@ Vercel Hobby 플랜의 Cron은 하루 한 번 등록할 수 있지만, 실행 �
 - **Backend**: Next.js Route Handlers (`/api/restaurants`, `/api/cron/kbabsang`)
 - **Data**: `restaurants.json`, Firebase Realtime Database, Firebase Storage
 - **외부 연동**: RapidAPI Instagram Scraper, 네이버 지도 링크
-- **Automation**: GitHub Actions &rarr; Vercel Cron Jobs
+- **Automation**: Vercel Cron Jobs
+- **Search / AI discovery**: JSON-LD, `robots.txt`, `sitemap.xml`, `llms.txt`
 - **Deployment**: Vercel
