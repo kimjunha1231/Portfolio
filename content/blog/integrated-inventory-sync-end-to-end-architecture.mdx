@@ -14,6 +14,8 @@ description: "재고 동기화 버튼을 누른 뒤 브라우저 캐시, Spring 
 
 통합재고 동기화의 핵심은 화면 버튼이 아니라 실행권·멱등성·publish transaction의 경계입니다. 현재 core 동기화는 중복 실행과 stale worker를 제어하고, 대시보드·통계 snapshot은 in-memory best-effort라는 별도 lifecycle을 가집니다. durable task와 generation을 도입하면 서버 재시작 이후 snapshot 복구와 결과 세대 추적까지 확장할 수 있습니다.
 
+아래 코드 예시는 별도의 의사코드가 아니라 현재 `FrontEnd`, `BackEnd`, `dummy-data` 저장소에서 실제로 사용하는 구간을 발췌한 것입니다. 따라서 문서에 등장하는 컬럼명과 상태값은 설계 후보가 아니라 현재 migration·Mapper·서비스 코드의 이름을 기준으로 적었습니다. 아직 구현하지 않은 generation·ETag·SSE·durable task는 각 절에서 명확히 “후속 설계”로 구분합니다.
+
 이번 글에서는 한 번의 동기화 요청을 **브라우저 → Spring Boot API → Oracle → Spring Batch → 대시보드·통계 스냅샷 → 브라우저 캐시** 순서로 분해하고, 각 경계의 책임과 선택 이유를 정리합니다.
 
 앞선 글에서는 서로 다른 네 원천 재고를 공통 `CanonicalInventoryRecord`로 번역하고 기존 업무 데이터와 매핑하는 방법을 다뤘습니다. 이번 글은 그 record가 실제 실행 버튼을 누른 뒤 어떤 보호 장치와 비동기 작업을 거치는지에 대한 후속 기록입니다.
@@ -118,25 +120,57 @@ Oracle 짧은 제출 트랜잭션
 
 ### 화면 캐시와 서버 상태를 분리했습니다
 
-통합재고 목록은 화면에서 잠깐 만든 값이 아니라 서버가 관리하는 상태입니다. 그래서 React 컴포넌트의 `useState`에 목록을 넣기보다 TanStack Query가 `page`, `size`, 검색어, 위험등급 같은 입력을 query key로 관리하도록 했습니다.
+통합재고 목록은 화면에서 잠깐 만든 값이 아니라 서버가 관리하는 상태입니다. 그래서 React 컴포넌트의 `useState`에 목록을 넣기보다 TanStack Query가 실제 요청 파라미터 객체를 query key로 관리하도록 했습니다. 아래는 `FrontEnd/src/entities/inventory/api/inventoryQueries.js`의 실제 query option입니다.
 
 ```js
-const inventoryQuery = useQuery({
-  queryKey: ["inventories", { page, size, keyword, riskLevel }],
-  queryFn: () => fetchInventories({ page, size, keyword, riskLevel }),
-  placeholderData: keepPreviousData,
-  staleTime: 30_000,
-  gcTime: 15 * 60_000,
-});
+export function inventoryListQueryOptions(params = {}) {
+  return queryOptions({
+    queryKey: inventoryKeys.list(params),
+    queryFn: ({ signal }) => getInventories(params, signal),
+    placeholderData: keepPreviousData,
+    retry: retryServerErrorOnly,
+  });
+}
 ```
 
-`staleTime`은 “이 데이터를 얼마 동안은 다시 최신인지 묻지 않을 것인가”입니다. `gcTime`은 “아무 컴포넌트도 사용하지 않는 캐시를 메모리에 얼마 동안 남길 것인가”입니다. 둘을 같은 의미로 생각하면 안 됩니다.
+목록 API가 실제로 보내는 파라미터도 `FrontEnd/src/entities/inventory/api/inventoryApi.js`에 고정되어 있습니다.
 
-최종 구조에서 generation을 서버가 반환하면 다음과 같이 더 정밀하게 무효화할 수 있습니다.
+```js
+if (filters.q) params.q = filters.q;
+if (filters.channelType?.length) params.channelType = filters.channelType;
+if (filters.salesPointCode?.length) params.salesPointCode = filters.salesPointCode;
+if (filters.warehouseCode?.length) params.warehouseCode = filters.warehouseCode;
+if (filters.regionCode?.length) params.regionCode = filters.regionCode;
+if (filters.categoryId) params.categoryId = filters.categoryId;
+if (filters.storageType?.length) params.storageType = filters.storageType;
+if (filters.riskGrade?.length) params.riskGrade = filters.riskGrade;
+if (filters.assessmentStatus?.length) params.assessmentStatus = filters.assessmentStatus;
+if (includePagination) {
+  if (filters.page) params.page = filters.page;
+  if (filters.size) params.size = filters.size;
+  if (filters.sort) params.sort = filters.sort;
+}
+```
+
+`staleTime`은 “이 데이터를 얼마 동안은 다시 최신인지 묻지 않을 것인가”입니다. 목록 query에는 전역 기본값을 사용하고, 필터 기준정보·상세·LOT·대시보드 snapshot처럼 성격이 다른 query에만 실제 코드의 `5 * 60 * 1000` 또는 `60 * 1000`을 별도로 둡니다.
+
+동기화 성공 후의 무효화도 generation을 가정한 의사코드가 아니라 현재 `FrontEnd/src/features/inventory-sync/ui/InventorySyncControl.jsx`에서 다음처럼 수행합니다.
+
+```js
+queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() });
+queryClient.invalidateQueries({ queryKey: inventoryKeys.summaries() });
+queryClient.invalidateQueries({ queryKey: inventoryKeys.details() });
+queryClient.invalidateQueries({ queryKey: inventoryKeys.lots() });
+queryClient.invalidateQueries({ queryKey: riskQueryKeys.all });
+queryClient.invalidateQueries({ queryKey: dashboardKeys.snapshot() });
+queryClient.invalidateQueries({ queryKey: statisticsKeys.all });
+```
+
+현재 API 응답에는 `generation`이나 `query.meta.generation`이 없습니다. 따라서 다음과 같은 generation 기반 predicate는 현재 코드 예시가 아니라, 서버가 세대 컬럼을 반환할 때 검토할 후속 설계입니다.
 
 ```js
 queryClient.invalidateQueries({
-  queryKey: ["inventories"],
+  queryKey: inventoryKeys.all,
   predicate: (query) => query.meta?.generation !== latestGeneration,
 });
 ```
@@ -155,32 +189,57 @@ queryClient.invalidateQueries({
 
 ### 고정 polling 대신 active-only adaptive polling을 사용합니다
 
-동기화가 실행 중일 때만 상태 API를 확인합니다. `QUEUED`는 3초, `RUNNING`은 10초 간격으로 조회하며, `SUCCEEDED`, `FAILED`, `SOURCE_CHANGED`, `LAUNCH_FAILED` 같은 terminal 상태에서는 polling을 멈춥니다. `INTERRUPTED`는 recovery 대상이므로 일반 active polling 대상과 구분합니다.
+동기화가 실행 중일 때만 상태 API를 확인합니다. `QUEUED`는 3초, `RUNNING`은 10초 간격으로 조회하며, `SUCCEEDED`, `FAILED`, `SOURCE_CHANGED`, `LAUNCH_FAILED` 같은 terminal 상태에서는 polling을 멈춥니다. `INTERRUPTED`는 recovery 대상이므로 일반 active polling 대상과 구분합니다. 다음은 `FrontEnd/src/features/inventory-sync/model/inventorySyncQueries.js`의 실제 구현입니다.
 
 ```js
 const POLL_INTERVAL_BY_STATUS_MS = {
-  QUEUED: 3_000,
+  QUEUED: 3000,
   RUNNING: 10_000,
 };
 
-const refetchInterval = (query) => {
-  const status = query.state.data?.status;
-  return POLL_INTERVAL_BY_STATUS_MS[status] ?? false;
-};
+export function inventorySyncPollInterval(query) {
+  if (query?.state?.status === 'error') return false;
+  return POLLABLE_STATUSES.has(query?.state?.data?.status)
+    ? POLL_INTERVAL_BY_STATUS_MS[query.state.data.status]
+    : false;
+}
+
+export function inventorySyncLatestQueryOptions() {
+  return queryOptions({
+    queryKey: inventorySyncKeys.latest(),
+    queryFn: ({ signal }) => getInventorySyncLatest(signal),
+    staleTime: 10_000,
+    retry: false,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+    refetchInterval: inventorySyncPollInterval,
+    refetchIntervalInBackground: false,
+  });
+}
 ```
+
+실제 파일에는 `POLLABLE_STATUSES = new Set(['QUEUED', 'RUNNING'])`도 함께 선언되어 있습니다. 즉 `error`, `INTERRUPTED`, terminal 상태에서는 `false`를 반환하고, 백그라운드 탭에서는 `refetchIntervalInBackground: false`로 반복 조회를 멈춥니다.
 
 여기서 중요한 것은 “polling이 동시성을 막는다”가 아니라는 점입니다. polling은 화면이 최신 상태를 다시 읽는 방법입니다. 동시 실행을 막는 일은 뒤에서 설명할 Oracle guard가 담당합니다. 창이 다시 활성화되거나 네트워크가 복구될 때 한 번 즉시 조회하는 것도 polling을 완전히 없애기 위한 것이 아니라, 연결이 끊겼던 동안의 상태를 보정하기 위한 동작입니다.
 
 ## 2단계. 브라우저에서 시작 API를 호출합니다
 
-버튼을 누르면 브라우저는 이번 제출을 식별하는 `clientRequestId`를 생성합니다. 서버는 이 값을 unique guard와 재전송 멱등성 확인에 사용합니다.
+버튼을 누르면 브라우저는 `crypto.randomUUID()`로 이번 제출을 식별하는 `clientRequestId`를 생성합니다. 현재 시작 API의 body에는 scope나 trigger type을 따로 보내지 않습니다. 수동 요청은 Backend가 `trigger_type = 'MANUAL'`, `active_scope_key = 'INVENTORY_CANONICAL'`로 채웁니다.
 
 ```json
 {
-  "clientRequestId": "8f3f0c4a-...",
-  "triggerType": "MANUAL",
-  "requestedScope": "INVENTORY_CANONICAL"
+  "clientRequestId": "550e8400-e29b-41d4-a716-446655440000"
 }
+```
+
+Backend의 실제 request DTO는 다음 한 필드만 받습니다(`BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/dto/InventorySyncStartRequest.java`).
+
+```java
+public record InventorySyncStartRequest(
+        @NotBlank @Size(min = 16, max = 80)
+        @Pattern(regexp = "[A-Za-z0-9_-]+")
+        String clientRequestId
+) { }
 ```
 
 서버는 다음 결과를 구분해 응답합니다.
@@ -191,6 +250,22 @@ const refetchInterval = (query) => {
 | `200 OK` | 같은 `clientRequestId`의 이전 요청을 재전송한 경우입니다. | 기존 실행을 새로 만들지 않고 기존 결과를 표시합니다. |
 | `409 Conflict` | 이미 같은 scope의 실행이 진행 중입니다. | “다른 동기화가 진행 중”이라고 보여줍니다. |
 | `429 Too Many Requests` | 짧은 시간에 너무 많이 요청했습니다. | 잠시 뒤 다시 시도하도록 안내합니다. |
+
+이 상태 코드는 문서에서 임의로 정한 값이 아닙니다. `BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/controller/InventorySyncRunController.java`가 service의 `SubmissionResult.httpStatus()`를 그대로 사용하고, 새 `202` 실행에만 `Location: /api/v1/inventory-sync-runs/{syncRunId}`를 붙입니다.
+
+```java
+var result = service.submit(request, principal == null ? null : principal.getUserId());
+if (result.httpStatus() == 429) {
+    return ResponseEntity.status(429)
+            .header("Retry-After", Long.toString(result.retryAfterSeconds()))
+            .body(ApiErrorResponse.of(ErrorCode.RATE_LIMITED, "동기화 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.", InventorySyncRoutes.RUNS));
+}
+ResponseEntity.BodyBuilder builder = ResponseEntity.status(result.httpStatus());
+if (result.response() != null && result.httpStatus() == 202) {
+    builder.location(URI.create(InventorySyncRoutes.RUNS + "/" + result.response().syncRunId()));
+}
+return builder.body(ApiResponse.of(result.response()));
+```
 
 네트워크가 끊겼을 때 사용자가 버튼을 다시 누르는 상황을 생각해 보겠습니다. 서버가 첫 요청을 받았지만 응답만 유실되었을 수 있습니다. 같은 `clientRequestId`로 재전송하면 서버는 새로운 작업을 또 만들지 않고 기존 요청을 찾아 응답합니다. 이것이 멱등성입니다. “같은 요청을 여러 번 보내도 결과가 한 번만 적용되는 성질”이라고 이해하면 됩니다.
 
@@ -204,20 +279,79 @@ Oracle의 `SELECT ... FOR UPDATE`는 선택한 행을 잠그고 트랜잭션이 
 
 이 행 잠금은 제출 트랜잭션이 커밋되거나 롤백될 때 풀립니다. 따라서 core worker가 몇 분 동안 실행되는 동안 Oracle mutex를 계속 붙잡아 두는 설계가 아닙니다.
 
+`BackEnd/src/main/resources/mappers/inventorysync/InventorySyncRunMapper.xml`의 실제 제출 guard는 singleton 행 전체를 잠급니다. `mutex_id = 1` 조건을 SQL에 하드코딩하지 않는 대신, migration이 PK와 `CHECK (mutex_id = 1)`로 singleton 자체를 보장합니다.
+
 ```sql
-SELECT 1
-FROM inventory_sync_mutex
-WHERE mutex_id = 1
-FOR UPDATE;
+SELECT 1 FROM inventory_sync_mutex
+ FOR UPDATE;
 ```
 
-이 트랜잭션 안에서 서버는 다음 순서로 검사합니다.
+그 singleton과 실행 row의 실제 DDL은 `BackEnd/src/main/resources/db/migration/V21__create_inventory_source_sync_schema.sql`에 있습니다.
+
+```sql
+CREATE TABLE inventory_sync_mutex (
+    mutex_id NUMBER(1) NOT NULL,
+    created_at TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT pk_inventory_sync_mutex PRIMARY KEY (mutex_id),
+    CONSTRAINT ck_inventory_sync_mutex_singleton CHECK (mutex_id = 1)
+);
+INSERT INTO inventory_sync_mutex (mutex_id) VALUES (1);
+
+CREATE TABLE inventory_sync_run (
+    client_request_id VARCHAR2(80) NOT NULL,
+    active_scope_key VARCHAR2(50),
+    CONSTRAINT uq_isync_client_request UNIQUE (client_request_id),
+    CONSTRAINT uq_isync_active_scope UNIQUE (active_scope_key),
+    CONSTRAINT ck_isync_active_scope CHECK (
+        active_scope_key IS NULL OR active_scope_key = 'INVENTORY_CANONICAL'
+    )
+);
+```
+
+실제 V21은 위 제약을 `CREATE TABLE inventory_sync_run` 안에 선언합니다. `active_scope_key`는 terminal 전환 시 `NULL`로 지워지고, Oracle의 unique 제약은 여러 `NULL`을 허용하므로 `INVENTORY_CANONICAL`이라는 non-null active 값은 한 행만 가질 수 있습니다.
+
+이 트랜잭션 안에서 서버는 실제로 다음 순서로 검사합니다.
 
 1. 같은 `clientRequestId`가 이미 저장되었는지 확인합니다.
 2. `active_scope_key = 'INVENTORY_CANONICAL'`인 실행이 있는지 확인합니다.
 3. 진행 중이면 새 실행을 만들지 않고 `409`를 반환합니다.
 4. 없으면 `QUEUED`인 `inventory_sync_run`을 하나 삽입합니다.
 5. 트랜잭션이 커밋된 뒤에만 worker 실행을 시작합니다.
+
+코드의 핵심은 `BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/service/InventorySyncSubmissionService.java`와 `InventorySyncRunMapper.xml`에 그대로 있습니다.
+
+```java
+if (runMapper.lockSubmissionGuard() != 1) {
+    throw new IllegalStateException("inventory source state is not initialized");
+}
+String hash = requestHash(request);
+InventorySyncRunVO existing = runMapper.selectByClientRequestId(request.clientRequestId());
+if (existing != null) {
+    if (!hash.equals(existing.getRequestHash())) {
+        return new SubmissionResult(409, InventorySyncRunResponse.from(existing));
+    }
+    return new SubmissionResult(200, InventorySyncRunResponse.from(existing));
+}
+InventorySyncRunVO active = runMapper.selectActiveRun();
+if (active != null) {
+    return new SubmissionResult(409, InventorySyncRunResponse.from(active));
+}
+run.setRunStatus("QUEUED");
+runMapper.insertRun(run);
+```
+
+실제 insert가 채우는 컬럼은 요청 body의 가상 scope 필드가 아니라 다음과 같습니다.
+
+```xml
+INSERT INTO inventory_sync_run (
+    client_request_id, request_hash, trigger_type, run_status, active_scope_key,
+    fencing_token, main_attempt_no, requested_by, requested_at,
+    created_at, updated_at
+) VALUES (
+    #{clientRequestId}, #{requestHash}, #{triggerType}, 'QUEUED', 'INVENTORY_CANONICAL',
+    1, 0, #{requestedBy}, SYSTIMESTAMP, SYSTIMESTAMP, SYSTIMESTAMP
+)
+```
 
 ### 비관적 락만으로 충분하지 않은 이유
 
@@ -249,6 +383,20 @@ Redis가 쓸모없다는 뜻은 아닙니다. 캐시, rate limit, 실시간 fan-
 
 제출 API가 트랜잭션을 열어둔 채 worker를 직접 호출하지 않습니다. 먼저 `QUEUED` 실행을 커밋하고, 커밋 후에 bounded launcher가 Spring Batch job을 시작합니다. 이렇게 해야 API 트랜잭션 롤백으로 실행이 사라졌는데 worker만 시작되는 상황을 피할 수 있습니다.
 
+실제 `InventorySyncSubmissionService`는 `TransactionSynchronizationManager`의 `afterCommit` callback에서 `launcher.launch(runId)`를 호출합니다. launcher의 큐는 `ThreadPoolExecutor(1, 1, new ArrayBlockingQueue<>(4), AbortPolicy)`로 제한되어 있고, 큐가 가득 차면 `LAUNCH_FAILED` control transaction으로 기록합니다.
+
+```java
+TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+    @Override
+    public void afterCommit() {
+        if (!launcher.launch(runId)) {
+            markLaunchFailed(runId, run.getMainAttemptNo(), run.getFencingToken(),
+                    "worker queue가 가득 차 실행을 등록하지 못했습니다.");
+        }
+    }
+});
+```
+
 ### worker는 브라우저의 Web Worker가 아닙니다
 
 여기서 worker는 서버에서 백그라운드 작업을 처리하는 실행자입니다. 브라우저 화면의 JavaScript를 별도 스레드에서 실행하는 Web Worker와 다른 개념입니다.
@@ -257,7 +405,7 @@ Spring Batch는 작업의 단계와 실행 메타데이터를 관리합니다. `
 
 ### 원천 4종을 한 번에 메모리에 올리지 않습니다
 
-현재 worker는 원천 순서를 정하고 한 페이지씩 읽습니다. 기본 page size는 500이며, 원천의 `source_record_key`와 `row map`을 함께 조회합니다.
+현재 worker는 원천 순서를 `OFFLINE → ECOMMERCE → GREETING → WAREHOUSE`로 정하고 한 페이지씩 읽습니다. `InventorySyncWorker.PAGE_SIZE`는 실제로 `500`이며, `source_record_key`와 `inventory_source_row_map`을 keyset 방식으로 조회합니다.
 
 ```text
 OFFLINE → ECOMMERCE → GREETING → WAREHOUSE
@@ -271,11 +419,35 @@ OFFLINE → ECOMMERCE → GREETING → WAREHOUSE
 원천 행은 다음 조건을 만족할 때 변경 후보가 됩니다.
 
 ```sql
-src.synced_record_hash IS NULL
-OR src.record_hash <> src.synced_record_hash
+WHERE m.source_type = #{sourceType}
+  AND m.mapping_status = 'MAPPED' AND m.is_deleted = 0
+  AND st.current_version = #{sourceVersion}
+  AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash)
+  <if test="lastSourceRecordKey != null">
+    AND m.source_record_key &gt; #{lastSourceRecordKey}
+  </if>
+ORDER BY m.source_record_key
+FETCH NEXT #{limit} ROWS ONLY
 ```
 
+위 구간은 `BackEnd/src/main/resources/mappers/inventorysync/InventorySyncSourcePageMapper.xml`의 실제 filter입니다. `src`는 source type별 current 테이블에서 projection한 inline view이고, `m`은 `inventory_source_row_map`, `st`는 `inventory_source_state`입니다. 따라서 `record_hash`가 달라도 `mapping_status != 'MAPPED'`이면 page에 들어오지 않습니다.
+
 `record_hash`는 행의 현재 내용을 요약한 값이고, `synced_record_hash`는 마지막으로 canonical에 반영했을 때의 요약값입니다. 둘이 같으면 재처리 후보에서 제외할 수 있습니다. 다만 hash는 “변경 후보를 줄이는 기준”이지 최종 진실 그 자체는 아닙니다. publish 단계에서 target 값과 transaction을 다시 확인해야 합니다.
+
+worker가 실제로 page를 넘기는 코드는 다음과 같습니다.
+
+```java
+String lastSourceRecordKey = null;
+for (;;) {
+    List<CanonicalInventoryRecord> page = sourceMapper.selectCanonicalPage(
+            sourceType, sourceVersion, lastSourceRecordKey, PAGE_SIZE
+    );
+    if (page.isEmpty()) break;
+    page.forEach(record -> adapters.get(sourceType).accept(record, buffer));
+    lastSourceRecordKey = page.get(page.size() - 1).sourceRecordKey();
+    if (page.size() < PAGE_SIZE) break;
+}
+```
 
 원천 수량을 직접 `UPDATE`하는 데모를 만들 때도 수량만 바꾸면 안 됩니다. `row_version`, `record_hash`, `inventory_source_state.current_version`, `pending_record_count`가 함께 갱신되어야 다음 sync가 변경을 알아챌 수 있습니다. 그래서 프로젝트의 `INVENTORY_DEMO_ADJUSTMENT`는 시연용 수량 변경과 멱등성·감사 이력을 담당하지만, canonical 업무 데이터는 직접 수정하지 않습니다.
 
@@ -305,19 +477,103 @@ canonical 상품·SKU·LOT·재고 target 비교
 
 재고만 반영되고 위험등급은 이전 실행을 가리키는 상황을 줄이기 위해, 현재 범위에서는 canonical publish와 위험등급 계산을 하나의 core 트랜잭션 경계에서 처리합니다. 그렇다고 대시보드·통계 스냅샷까지 이 트랜잭션에 억지로 넣지는 않습니다. 집계 결과는 별도의 읽기 모델에 저장할 수 있고, 계산 시간이 길어지면 core 작업을 불필요하게 붙잡기 때문입니다.
 
-## 6단계. 대시보드와 통계 스냅샷은 별도 작업입니다
+실제 publish entry point는 `InventorySyncPublisher.publish`의 `@Transactional` 메서드입니다. `InventorySyncCanonicalBatchWriter`는 reference target을 먼저 쓰고, `inventory_balance`를 500건 단위로 나눈 뒤 source current의 `synced_record_hash`를 같은 transaction에서 갱신합니다.
 
-core publish가 성공했다고 화면용 대시보드와 통계가 이미 계산된 것은 아닙니다. 두 집계는 같은 동기화 결과를 읽지만 서로 다른 작업입니다.
-
-후속 구조에서는 core commit 직후 다음 두 durable task를 DB에 저장하는 방식을 검토합니다. 현재 코드에는 이 테이블이 없고, `InventorySyncSnapshotCoordinator`가 두 개의 bounded in-memory executor를 사용합니다.
-
-```text
-inventory_sync_task
-├─ (sync_run_id, DASHBOARD_SNAPSHOT)
-└─ (sync_run_id, STATISTICS_SNAPSHOT)
+```java
+@Transactional
+public PublishResult publish(
+        InventorySyncAttemptBuffer buffer,
+        FencingGuard fencingGuard,
+        CanonicalBatchWriter writer,
+        CompletionWriter completion
+) {
+    fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
+    writer.beforeWrite(buffer.runId(), buffer.sourceVersions());
+    int changed = writer.writeReferenceTargets(buffer.runId(), buffer, buffer.requestedBy());
+    List<CanonicalInventoryRecord> batch = new java.util.ArrayList<>(BATCH_SIZE);
+    for (CanonicalInventoryRecord record : buffer.records()) {
+        batch.add(record);
+        if (batch.size() == BATCH_SIZE) {
+            changed += writer.writeBatch(buffer.runId(), List.copyOf(batch), buffer.requestedBy());
+            batch.clear();
+            fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
+        }
+    }
+    if (!batch.isEmpty()) {
+        changed += writer.writeBatch(buffer.runId(), List.copyOf(batch), buffer.requestedBy());
+    }
+    writer.finish(buffer.runId(), buffer.sourceVersions(), buffer.riskScopes(), buffer.requestedBy());
+    fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
+    PublishResult result = new PublishResult(buffer.size(), changed, buffer.riskScopes().size());
+    completion.complete(buffer, result);
+    return result;
+}
 ```
 
-각 task에는 `PENDING`, `RUNNING`, `RETRY_WAIT`, `SUCCEEDED`, `FAILED` 상태와 시도 횟수, `lease_expires_at`, 마지막 오류, 완료 시각을 둡니다. 두 task를 unique key로 묶으면 같은 sync run에 같은 종류의 작업이 두 번 생성되지 않습니다.
+canonical target의 컬럼명은 `BackEnd/src/main/resources/mappers/inventorysync/InventorySyncCanonicalMapper.xml`에서 확인할 수 있습니다.
+
+```xml
+<update id="updateInventoryBalances">
+    MERGE INTO inventory_balance target
+    USING (
+        <foreach collection="records" item="record" separator=" UNION ALL ">
+            SELECT CAST(#{record.inventoryBalanceId} AS NUMBER) AS inventory_balance_id,
+                   CAST(#{record.onHandQty} AS NUMBER(15,3)) AS on_hand_qty,
+                   CAST(#{record.reservedQty} AS NUMBER(15,3)) AS reserved_qty
+              FROM dual
+        </foreach>
+    ) source
+       ON (target.inventory_balance_id = source.inventory_balance_id AND target.is_deleted = 0)
+    WHEN MATCHED THEN UPDATE SET
+         target.on_hand_qty = source.on_hand_qty,
+         target.reserved_qty = source.reserved_qty,
+         target.updated_at = SYSTIMESTAMP,
+         target.updated_by = #{actorId}
+     WHERE NVL(target.on_hand_qty, -1) != NVL(source.on_hand_qty, -1)
+        OR NVL(target.reserved_qty, -1) != NVL(source.reserved_qty, -1)
+</update>
+```
+
+위 `USING` 절은 `CanonicalInventoryRecord.inventoryBalanceId`, `onHandQty`, `reservedQty`를 각각 `inventory_balance_id`, `on_hand_qty`, `reserved_qty`로 바인딩합니다. 새 canonical row를 자동 삽입하는 `WHEN NOT MATCHED`는 runtime mapper에 없고, 앞 단계의 row map이 가리키는 기존 PK만 갱신합니다. 위험 평가는 `risk_assessment.inventory_sync_run_id`에 같은 `runId`를 기록합니다.
+
+## 6단계. 대시보드와 통계 스냅샷은 별도 작업입니다
+
+core publish가 성공했다고 화면용 대시보드와 통계가 이미 계산된 것은 아닙니다. 두 집계는 같은 동기화 결과를 읽지만 서로 다른 작업입니다. 현재 코드에는 `inventory_sync_task` 테이블이 없고, `InventorySyncSnapshotCoordinator`가 두 개의 bounded in-memory executor를 사용합니다.
+
+실제 구현은 `InventorySyncCanonicalBatchWriter.finish`에서 `scheduleAfterCommit`을 호출하고, coordinator가 DB commit 이후 두 작업을 각각 예약하는 방식입니다.
+
+```text
+canonical publish transaction commit
+        ↓ afterCommit
+dashboardExecutor → DashboardSnapshotService.createSnapshot(syncRunId, businessDate)
+statisticsExecutor → StatisticsSnapshotService.createInventorySnapshots(syncRunId, businessDate)
+```
+
+```java
+public void scheduleAfterCommit(Long syncRunId, LocalDate businessDate) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                schedule(syncRunId, businessDate);
+            }
+        });
+        return;
+    }
+    schedule(syncRunId, businessDate);
+}
+
+void schedule(Long syncRunId, LocalDate businessDate) {
+    submit(dashboardExecutor,
+            () -> dashboardSnapshotService.createSnapshot(syncRunId, businessDate),
+            "dashboard", syncRunId);
+    submit(statisticsExecutor,
+            () -> statisticsSnapshotService.createInventorySnapshots(syncRunId, businessDate),
+            "statistics", syncRunId);
+}
+```
+
+후속 구조에서 `inventory_sync_task`를 도입한다면 `(sync_run_id, task_type)` unique key와 `PENDING/RUNNING/RETRY_WAIT/SUCCEEDED/FAILED` 같은 상태를 저장할 수 있습니다. 하지만 이 테이블과 컬럼은 현재 migration에 없으므로, 현재 구현으로 소개하지 않고 다음 스키마 변경 후보로만 남깁니다.
 
 | 상황 | 바람직한 처리 |
 | --- | --- |
@@ -360,6 +616,25 @@ INTERRUPTED 또는 RETRY_WAIT로 전환
 ```
 
 lease는 “작업이 살아 있는지 판단하는 시간표”이지 Oracle row lock을 며칠 동안 유지하는 장기 락이 아닙니다. 후속 durable task를 도입할 때에는 같은 task를 두 worker에게 주지 않도록 claim update와 fencing token을 DB 조건에 포함해야 합니다.
+
+현재 run 복구는 `InventorySyncRunMapper.xml`의 실제 조건으로 이전 worker를 끊습니다. `advanceRecoveryAttempt`가 `main_attempt_no`와 `fencing_token`을 각각 1씩 올리기 때문에, 늦게 돌아온 worker가 이전 token으로 `heartbeat`, `updatePhase`, `complete`를 호출해도 `WHERE fencing_token = #{fencingToken}` 조건을 통과하지 못합니다.
+
+```xml
+<update id="advanceRecoveryAttempt">
+    UPDATE inventory_sync_run
+       SET run_status = 'QUEUED', current_phase = NULL,
+           main_attempt_no = main_attempt_no + 1,
+           fencing_token = fencing_token + 1,
+           main_batch_job_execution_id = NULL,
+           lease_owner_instance_id = NULL, lease_expires_at = NULL,
+           heartbeat_at = NULL, updated_at = SYSTIMESTAMP
+     WHERE inventory_sync_run_id = #{runId}
+       AND run_status IN ('INTERRUPTED', 'QUEUED')
+       AND (run_status = 'INTERRUPTED' OR requested_at <= #{now} - INTERVAL '5' MINUTE)
+       AND (lease_expires_at IS NULL OR lease_expires_at <= #{now})
+       AND (lease_owner_instance_id IS NULL OR heartbeat_at IS NULL OR heartbeat_at <= #{now} - INTERVAL '5' MINUTE)
+</update>
+```
 
 또한 실행 버튼의 active guard를 core publish 직후 풀어버리면, 첫 번째 sync의 snapshot이 끝나기 전에 두 번째 sync가 시작될 수 있습니다. 현재 구현은 core run의 lifecycle을 기준으로 active scope를 관리하며, 스냅샷 task까지 묶어 해제하는 전이는 아직 없습니다. 후속 durable task를 도입할 때 dashboard와 statistics task가 모두 terminal 상태가 된 뒤에만 `active_scope_key`를 비우는 방식을 검토합니다. 스냅샷이 수 분 이상 걸리는 운영 규모가 되면, 특정 `syncRunId`의 읽기 시점을 고정한 뒤 core active lock을 먼저 해제하는 snapshot isolation/read model 구조도 별도 검토해야 합니다.
 
