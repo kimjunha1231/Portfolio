@@ -1,0 +1,524 @@
+---
+title: "통합재고 구현 작업 기록: 원천 정규화부터 조회·동기화·위험도 산정까지"
+date: "2026-08-23"
+lastModified: "2026-08-23"
+published: false
+section: "작업 기록"
+category: "Internal Portfolio / Integrated Inventory"
+tags: ["통합재고", "Oracle", "Spring Boot", "Spring Batch", "MyBatis", "React", "TanStack Query", "RiskRuleEngine", "DB 설계"]
+cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
+coverAlt: "네 원천 재고가 공통 record와 검증 경계를 거쳐 canonical 업무 데이터와 위험 평가로 이어지는 밝은 기술 도식"
+coverFit: "contain"
+description: "통합재고 조회 기능을 만들며 실제 코드와 버전별 스키마 변경에 적용한 데이터 모델, 동기화 실행, 트랜잭션, 프론트엔드, 위험도 산정과 트레이드오프를 내부 포트폴리오용으로 정리한 작업 기록입니다."
+---
+
+> 이 문서는 공개 블로그 글이 아니라 작업 내용을 다시 학습하기 위한 내부 기록입니다. 현재 코드와 저장소 문서에서 확인한 사실, 그 사실에서 도출한 설계 판단, 아직 구현하지 않은 후속 설계를 구분해 적습니다.
+
+## 기록의 기준
+
+이 기능을 이해할 때 기준으로 삼은 자료는 다음과 같습니다.
+
+| 기준 | 확인한 내용 |
+| --- | --- |
+| BackEnd 코드 | 통합재고 조회·상세·LOT, 원천 동기화 제출·worker·publish, 위험도 평가, 데모 차감 API |
+| FrontEnd 코드 | 통합재고 목록·필터·상세 drawer·LOT 탭·위험 상태·동기화 버튼과 상태 polling |
+| 버전별 SQL | 원천 current, 매핑, 실행 상태, source state, 오류, demo adjustment, 위험 평가 lineage의 테이블·제약 |
+| `docs/integrated-inventory` | API 계약, 수량 의미, 위험도 규칙, 동기화 운영 시나리오, fixture 검증 결과 |
+| 커밋 기록 | YSK-56/58, YSK-79/80, YSK-108/109에 해당하는 기능 분해와 수정 순서 |
+
+실제 Oracle 스키마에 이 문서가 직접 DDL/DML을 실행한 것은 아닙니다. 로컬 코드·SQL·문서와 기록된 검증 결과를 근거로 정리했으며, 운영 성능 수치나 실제 배포 장애 수치를 만들어 쓰지 않습니다.
+
+## 1. 문제 정의: 네 시스템의 재고를 한 화면에서 같은 의미로 다루기
+
+서비스에서 보여주려는 것은 “재고 테이블 하나”가 아니라 상품·SKU·판매처·LOT·정책·가격·원가를 함께 고려한 통합재고입니다. 원천은 다음 네 영역으로 나뉩니다.
+
+| 원천 | 원천 수량 컬럼 | 서비스 공통 의미 |
+| --- | --- | --- |
+| 오프라인 | `available_stock_count` | `on_hand_qty` |
+| 이커머스 | `sellable_quantity` | `on_hand_qty` |
+| 그리팅 | `saleable_meal_count` | `on_hand_qty` |
+| 물류센터 | `physical_available_qty` | `on_hand_qty` |
+
+컬럼명이 다른 것만 문제가 아닙니다. 물류센터에는 판매처에 배정되지 않은 공용 재고가 있고, 그리팅은 식수 단위와 품절 플래그를 사용하며, 원천마다 가격·원가·LOT 정보의 존재 범위가 다릅니다. 원천 테이블을 `UNION ALL`해 넓은 공통 테이블로 만들면 같은 이름을 붙이는 일은 가능하지만, 값이 없는 이유가 “해당 개념이 없음”인지 “누락”인지 흐려집니다.
+
+따라서 문제를 다음 세 가지 책임으로 나눴습니다.
+
+1. 원천의 현재 계약은 원천 테이블에 보존합니다.
+2. 서비스가 이해할 공통 의미는 SQL projection과 typed record로 정의합니다.
+3. 실제 업무 데이터의 갱신 대상은 명시적인 row map으로 연결합니다.
+
+```text
+오프라인 current ─┐
+이커머스 current ──┤
+그리팅 current ────┼─ SQL projection + row map ── CanonicalInventoryRecord
+물류센터 current ──┘                                      │
+                                                          ├─ 상품·SKU
+                                                          ├─ 가격·원가·LOT·정책
+                                                          └─ 재고 잔량·위험 평가
+```
+
+## 2. 작업 범위와 커밋 흐름
+
+커밋은 기능을 한 번에 완성하기보다 조회 화면, 상세·예측·위험 상태, 원천 동기화 순서로 확장되었습니다. 작성자 alias가 `junha_kim`과 `kimjunha1231`로 나뉘는 커밋은 같은 작업자의 기록으로 묶어 해석했습니다.
+
+| 기능 묶음 | BackEnd | FrontEnd | 구현 범위 |
+| --- | --- | --- | --- |
+| 통합재고 조회 | YSK-58, `46e3696` | YSK-56, `9489ed7` | 목록·검색·필터·페이지네이션·상세·LOT |
+| 수요예측·재고 상태 | YSK-80, `a9ac335` | YSK-79, `7fb9673` | 예측 응답, 위험 필터·배지, 상세 상태, 접근성 |
+| 원천 동기화·재평가 | YSK-109, `b510342` | YSK-108, `baf1b60` | source current, sync run, 500행 page worker, publish, risk 재평가, 동기화 UI |
+| 내부 보강 | `8d532ee`, `c1b121e`, `83dfd0d`, `0fbbddd`, `231aa95`, `d509179` | `c89ccac`, `079c1c2`, `4f5755d`, `e91396d` 등 | 예측 누락 정책, 미할당 재고, 전략 sync 필드, 상태 표시·접근성 |
+
+커밋 기록을 기능 단위로 다시 읽으면, 이 작업의 핵심은 다음 순서입니다.
+
+```text
+조회할 데이터 계약 정의
+  → 목록·상세 화면과 API 구현
+  → 수요예측·위험 상태 연결
+  → 원천 데이터를 기존 업무 테이블에 안전하게 동기화
+  → 시연·재실행·실패·복구 경계 보강
+```
+
+## 3. 데이터 모델: 원천 current와 canonical 업무 모델을 분리한 이유
+
+### 3.1 원천 current는 네 개를 유지했습니다
+
+`INVENTORY_SOURCE_OFFLINE`, `INVENTORY_SOURCE_ECOMMERCE`, `INVENTORY_SOURCE_GREETING`, `INVENTORY_SOURCE_WAREHOUSE`는 원천별 컬럼·제약·현재값을 보존합니다. 이 테이블은 서비스의 최종 조회 모델이 아니라 동기화가 읽는 입력 경계입니다.
+
+원천별 책임을 공통 컬럼으로 억지로 합치지 않은 이유는 다음과 같습니다.
+
+| 선택지 | 장점 | 비용·위험 | 판단 |
+| --- | --- | --- | --- |
+| 네 원천을 하나의 wide table로 통합 | 조회 시작점이 단순합니다. | 원천별 필수값과 상태가 섞이고 `NULL` 의미가 불분명해집니다. | 선택하지 않았습니다. |
+| 중간 staging 테이블을 영속화 | 변환 결과를 다시 읽고 감사하기 쉽습니다. | staging 수명·삭제·중복 스키마를 별도로 운영해야 합니다. | 현재 범위에서는 선택하지 않았습니다. |
+| 원천 current → 메모리 typed record → canonical | 원천 계약을 보존하고 publish 직전 검증을 한곳에 모읍니다. | 실행 중 buffer와 원천별 projection을 관리해야 합니다. | 현재 선택입니다. |
+
+### 3.2 canonical은 하나의 테이블이 아니라 업무 관계의 묶음입니다
+
+서비스가 조회하는 정식 모델은 `PRODUCT`, `SKU`, `SKU_CHANNEL_PRICE`, `SKU_COST`, `LOT`, `INVENTORY_POLICY`, `INVENTORY_BALANCE`가 관계로 연결된 구조입니다.
+
+| 테이블 | 책임 | 원천 동기화에서 갱신되는 대표 값 |
+| --- | --- | --- |
+| `PRODUCT` | 상품의 정체성·표시 정보 | 기존 상품 ID에 매핑된 상품 참조 |
+| `SKU` | 판매·재고 단위 | SKU 참조와 상품 관계 |
+| `SKU_CHANNEL_PRICE` | 판매처별 가격 | 채널 가격·판매 가능 상태 |
+| `SKU_COST` | 원가 | 원가·유효 기간 |
+| `LOT` | LOT와 유통기한 | LOT 식별·만료·판매중지 정보 |
+| `INVENTORY_POLICY` | 안전재고·운영 정책 | 안전재고·정책 버전 |
+| `INVENTORY_BALANCE` | 판매처·창고별 잔량 | `on_hand_qty`, `reserved_qty`, 상태 |
+| `RISK_ASSESSMENT` | 산정 결과와 사유 | grade, status, rule version, `sync_run_id` lineage |
+
+가격, 원가, LOT, 정책, 잔량은 변경 주기와 책임이 다릅니다. 하나의 넓은 테이블에 반복 저장하면 가격 변경 범위가 여러 행으로 넓어지고, 서로 다른 생명주기의 값이 같은 저장 단위에 묶입니다. 관계를 분리하면 원천 컬럼명이 바뀌어도 서비스 업무 모델을 다시 정의하지 않아도 됩니다.
+
+### 3.3 원천과 canonical 사이의 `ROW_MAP`
+
+`INVENTORY_SOURCE_ROW_MAP`은 “원천 행이 어느 기존 업무 행을 가리키는가”를 저장합니다.
+
+| 컬럼 묶음 | 예시 | 역할 |
+| --- | --- | --- |
+| 원천 키 | `source_type`, `source_record_key` | 원천 행을 재현하고 중복을 막습니다. |
+| 기준 ID | `product_id`, `sku_id`, `sales_point_id`, `warehouse_id`, `lot_id` | 상품·SKU·위치·LOT의 기존 행을 가리킵니다. |
+| 반영 대상 | `inventory_balance_id`, `sku_channel_price_id`, `sku_cost_id`, `inventory_policy_id` | publish가 갱신할 행을 명시합니다. |
+| 상태·방법 | `mapping_status`, `mapping_method`, `mapping_version`, `validated_at` | `MAPPED`만 운영 publish 대상이 됩니다. |
+| 감사 | `created_by`, `updated_by`, `created_at`, `updated_at` | row map 변경 이력을 추적합니다. 별도의 승인자 workflow는 구현하지 않았습니다. |
+
+현재 초기 매핑은 검증된 기준 snapshot에서 canonical ID를 결정적으로 조합해 `INITIAL_EXACT`와 `MAPPED`로 기록합니다. 이름이 비슷한 상품을 자동으로 추측하거나, row map이 없을 때 `MERGE`로 새 상품·SKU를 만드는 구조가 아닙니다. 매핑이 없거나 필수 ID가 없으면 worker가 전체 sync run을 publish 전에 실패시킵니다.
+
+### 3.4 버전별 스키마 변경에서 추가된 동기화 테이블
+
+동기화 전용 테이블은 재고 잔량 자체와 실행 제어·감사 데이터를 분리합니다. 각 테이블의 컬럼은 서로 다른 질문에 답하도록 나뉘어 있습니다.
+
+| 버전 | 테이블 또는 변경 | 대표 컬럼·제약 | 설계 의도 |
+| --- | --- | --- | --- |
+| V21 | `INVENTORY_SYNC_MUTEX` | `mutex_id = 1` singleton PK | 제출 경쟁을 짧게 직렬화하는 DB guard입니다. |
+| V21 | `INVENTORY_SYNC_RUN` | `client_request_id UNIQUE`, `request_hash`, `trigger_type`, `status`, `phase`, `active_scope_key UNIQUE`, `fencing_token`, lease·heartbeat, 처리 건수 | 한 번의 sync lifecycle과 재전송·동시 실행·stale worker 방어 정보를 저장합니다. |
+| V21 | `INVENTORY_SYNC_RUN_SOURCE` | run·source별 version/checksum, read·mapped·changed·error count | 네 원천을 한 run 안에서 각각 어디까지 처리했는지 기록합니다. |
+| V21 | `INVENTORY_SYNC_ERROR` | source type/key, phase, error code/message | 행 단위 실패 원인을 run과 분리해 남깁니다. |
+| V21 | `INVENTORY_SOURCE_STATE` | `source_type` PK, `current_version`, row count, checksum, 마지막 성공 run | 원천 snapshot의 기준 버전과 검증 결과를 관리합니다. |
+| V21 | `INVENTORY_SOURCE_*` 4종 | `source_record_key UNIQUE`, `record_hash`, `row_version`, `synced_record_hash`, `last_sync_run_id`, fixture/rule metadata, 원천별 수량·상태 | 입력 current와 마지막 publish 상태를 함께 보관합니다. |
+| V21 | `INVENTORY_SOURCE_ROW_MAP` | 원천 key UNIQUE, canonical FK 묶음, `INITIAL_EXACT/APPROVED_MANUAL`, `MAPPED/INVALID/REVIEW_REQUIRED` | 이름 추측 없이 기존 업무 행을 명시적으로 연결합니다. |
+| V22 | `RISK_ASSESSMENT.inventory_sync_run_id` | nullable FK와 조회 index | 위험 평가가 어느 sync run의 결과인지 추적합니다. |
+| V23 | `INVENTORY_DEMO_ADJUSTMENT` | `(request_id, source_type, source_record_key) UNIQUE`, `decrease_qty > 0`, APPLIED/REJECTED, payload·전후 버전·오류 | 시연용 원천 변경을 canonical 변경과 분리해 audit합니다. |
+| V24 | scheduled trigger 허용 | `trigger_type`에 `SCHEDULED`, `__system__` 실행 주체 | 수동 버튼과 같은 durable pipeline을 KST 00:30 예약 실행에서도 사용합니다. |
+
+이 표에서 V21~V24는 “현재 서비스에 영향을 주는 모든 테이블”이라는 뜻이 아닙니다. 전략·예측·기존 업무 테이블은 별도 기능의 책임을 가지며, 통합재고 동기화는 위 테이블과 기존 canonical target을 연결하는 범위입니다. `INVENTORY_DEMO_ADJUSTMENT`도 정식 재고 모델이 아니라 demo 입력 경계입니다.
+
+## 4. 초기 데이터 생성: 운영 기능이 아니라 fixture 준비 경로
+
+`dummy-data/scripts/generate_inventory_source_current.mjs`는 운영 worker가 아닙니다. 여섯 canonical snapshot, `sku_mapping.csv`, 그리팅·모두의집·더현대·홈플러스 raw fixture를 조합해 source current·row map·manifest를 생성하는 개발·검증용 generator입니다.
+
+```text
+canonical snapshot
+        + SKU mapping
+        + 원천 raw fixture
+                ↓
+       generator / serializer
+                ↓
+source current 4종 + row map + generation manifest
+```
+
+balance의 판매처 할당 규칙은 같은 재고를 두 원천에 복제하지 않도록 합니다.
+
+| 조건 | 원천 |
+| --- | --- |
+| `MODU_MATJIP` | `ECOMMERCE` |
+| `GREETING` | `GREETING` |
+| `HMART_` 또는 `DEPT_` 접두사 | `OFFLINE` |
+| 할당 판매처 없음 | `WAREHOUSE` |
+| 알 수 없는 판매처 | 생성 실패 |
+
+현재 fixture 검증 기준은 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 총 `33,358`행이며 row map도 `33,358`건입니다. 이 수치는 기준 fixture의 결과이지 운영 원천의 영구적인 건수 약속은 아닙니다.
+
+`--verify`는 generator를 다시 실행하는 명령이 아닙니다. baseline 입력 checksum, row count, 생성 파일 checksum, manifest의 파일 목록이 기존 manifest와 일치하는지 검사합니다. 동일 입력으로 재생성한 결과까지 비교하려면 별도의 출력 디렉터리에 다시 생성한 뒤 checksum을 비교해야 합니다.
+
+| 초기 데이터 방식 | 장점 | 단점 | 선택 |
+| --- | --- | --- | --- |
+| 사람이 CSV 작성 | 빠르게 시작할 수 있습니다. | 값이 달라지고 재현하기 어렵습니다. | 선택하지 않았습니다. |
+| 운영 원천 복사 | 실제 형태와 가깝습니다. | 기준 시점과 민감정보를 통제하기 어렵습니다. | 선택하지 않았습니다. |
+| 기준 snapshot generator | 같은 입력과 규칙으로 재생성·검증할 수 있습니다. | snapshot과 serializer를 함께 관리해야 합니다. | 현재 선택입니다. |
+
+## 5. 동기화 입력을 공통 record로 바꾸는 과정
+
+### 5.1 SQL projection과 typed validation을 나눴습니다
+
+`InventorySyncSourcePageMapper.xml`은 원천별 SQL projection을 담당합니다. 예를 들어 오프라인의 `available_stock_count`, 이커머스의 `sellable_quantity`, 그리팅의 `saleable_meal_count`, 물류센터의 `physical_available_qty`를 모두 `on_hand_qty` alias로 반환합니다. 날짜·수량·판매 가능 플래그도 원천별 표현을 공통 타입으로 맞춥니다.
+
+SQL projection은 원천 테이블의 컬럼을 바꾸지 않고 해당 조회 결과에만 alias·형 변환을 적용합니다. MyBatis는 이 SQL 결과를 Java 객체에 매핑합니다. 공통 의미의 필수 ID, 음수 수량, 예약 수량 관계, source version은 `CanonicalInventoryRecord` 생성자가 다시 검사합니다.
+
+```text
+source current + ROW_MAP 조인
+          ↓
+원천별 SELECT alias·형 변환
+          ↓
+CanonicalInventoryRecord 생성
+          ↓
+필수 ID·수량·상태 검증
+          ↓
+InventorySourceAdapter.accept
+          ↓
+InventorySyncAttemptBuffer
+```
+
+이 순서를 선택한 이유는 SQL과 Java의 책임을 분리하기 위해서입니다.
+
+| 변환 위치 | 장점 | 단점 | 이번 선택 |
+| --- | --- | --- | --- |
+| SQL projection | 원천 컬럼명·날짜·NULL 처리를 쿼리에서 확인할 수 있습니다. | 원천이 늘면 SQL이 늘어납니다. | 필드·타입 변환에 사용합니다. |
+| Java adapter에서 전체 변환 | IDE 타입 추론과 공통 함수 재사용이 쉽습니다. | 원천별 예외가 하나의 거대한 adapter에 모일 수 있습니다. | source type 확인과 buffer 수용에 제한합니다. |
+| DB view | 조회 SQL을 숨길 수 있습니다. | view 배포·권한·실행 계획을 별도로 관리해야 합니다. | 현재 범위에서는 사용하지 않았습니다. |
+
+### 5.2 변경 후보와 일관성 기준을 분리했습니다
+
+`record_hash`와 `synced_record_hash`는 해당 행의 값이 마지막 publish 이후 달라졌는지 판단하는 직접 기준입니다. 반면 `INVENTORY_SOURCE_STATE.current_version`은 원천을 읽는 동안 snapshot이 바뀌었는지 확인하는 일관성 기준입니다. `row_version`은 원천 행 버전과 demo adjustment의 audit/hash 계산에 사용되며 일반 pending 필터 그 자체는 아닙니다.
+
+```text
+record_hash != synced_record_hash
+        → 변경 후보
+
+scan 시작 시 source current_version 저장
+        → 원천 page 읽기
+scan 종료 후 current_version 재확인
+        → 바뀌었으면 publish 중단
+```
+
+hash가 다르다고 항상 canonical 값이 바뀌는 것은 아닙니다. 원천 전용 필드가 변했거나 hash 사전이 확장된 경우도 있으므로 hash는 후보를 줄이는 1차 필터이고, 최종 publish는 target 비교와 transaction이 담당합니다.
+
+### 5.3 page 처리와 fail-closed
+
+worker의 page size는 `500`입니다. 원천 전체를 한 번에 메모리에 올리지 않고 `source_record_key` keyset으로 다음 page를 읽습니다. 각 원천을 읽기 전 invalid/unmapped count를 검사하고, 하나라도 있으면 publish 전에 전체 run을 실패시킵니다.
+
+현재 정책은 부분 성공보다 전체 중단입니다. 일부 원천의 정상 행만 반영하면 같은 sync run 안에서 원천별 기준 시점이 달라지고, 어떤 수량은 새 값이고 어떤 수량은 이전 값인 혼합 상태가 될 수 있기 때문입니다. 잘못된 행만 격리하고 나머지를 계속 처리하는 정책은 향후 별도 운영 기준이 필요합니다.
+
+## 6. publish transaction과 실행 lifecycle
+
+### 6.1 제출 transaction
+
+`InventorySyncSubmissionService.submit`은 요청을 짧은 transaction으로 처리합니다.
+
+```text
+POST /api/v1/inventory-sync-runs
+        ↓
+inventory_sync_mutex 단일 행 FOR UPDATE
+        ↓
+clientRequestId 기존 기록 확인
+        ↓
+active_scope_key 중복 실행 확인
+        ↓
+QUEUED run INSERT
+        ↓
+commit 후 launcher 실행
+```
+
+여기서 락은 worker 전체를 잠그는 장기 락이 아닙니다. 제출 경쟁을 직렬화하고, 같은 scope에서 실행권을 한 번만 발급하기 위한 짧은 DB guard입니다. 화면에서 버튼을 disabled 처리하는 것만으로는 다른 브라우저의 요청을 막을 수 없으므로 서버와 DB가 최종 판단을 합니다.
+
+응답 계약은 다음과 같습니다.
+
+| 응답 | 의미 |
+| --- | --- |
+| `202 Accepted` | `QUEUED` run을 저장했고 commit 후 비동기 실행을 시작합니다. |
+| `200 OK` | 같은 `clientRequestId`의 동일 요청을 다시 보낸 경우 기존 run을 반환합니다. |
+| `409 Conflict` | 같은 ID에 다른 요청이 있거나 이미 active run이 있습니다. |
+| `429 Too Many Requests` | 제출 rate limit을 초과했습니다. |
+
+현재 `requestHash`는 `InventorySyncStartRequest`의 `clientRequestId`를 SHA-256으로 요약하는 값입니다. payload 전체를 해시해 서로 다른 옵션을 판별하는 계약은 아닙니다. 따라서 문서에서 “payload 멱등성”이라고 과장하지 않고 “client request ID 기반 재전송 방지”라고 표현해야 합니다.
+
+### 6.2 worker transaction
+
+커밋 후 Spring Batch launcher가 `inventorySyncMainJob`을 시작합니다. Spring Batch metadata는 `JobRepository`가 관리하지만, worker 전체를 하나의 거대한 DB transaction으로 묶지는 않습니다. 읽기·정규화 단계와 최종 publish 단계를 분리해 긴 transaction과 대량 row lock을 피합니다.
+
+```text
+Batch job 시작
+  → run RUNNING / phase 갱신
+  → OFFLINE·ECOMMERCE·GREETING·WAREHOUSE page 읽기
+  → version·heartbeat 확인
+  → buffer와 fencing token으로 publish 호출
+```
+
+`fencing_token`은 stale worker가 나중에 돌아와 새 attempt의 데이터를 덮어쓰지 못하게 하는 실행 세대 번호입니다. publish 전후와 batch 상태 변경에서 run id·attempt no·fencing token을 함께 확인합니다.
+
+### 6.3 core publish transaction
+
+`InventorySyncPublisher.publish`가 `@Transactional` 경계입니다. 이 transaction 안에서 canonical reference target, 가격·원가·LOT·정책·재고 balance, source synced hash, source state, run source, risk assessment lineage를 갱신합니다. 중간 오류가 나면 이 publish 묶음은 rollback됩니다.
+
+위험도 계산은 publish 이후 별도 API가 나중에 수행하는 방식이 아니라, `InventorySyncCanonicalBatchWriter.finish`에서 같은 core 흐름 안에 호출됩니다. 그래서 재고 수량은 새 값인데 위험도는 이전 run을 가리키는 상태를 줄일 수 있습니다.
+
+### 6.4 스냅샷은 현재 best-effort입니다
+
+core transaction commit 이후 `InventorySyncSnapshotCoordinator`가 dashboard와 statistics 작업을 각각 bounded in-memory executor에 등록합니다. 두 작업은 core publish와 분리되어 한쪽 집계 실패가 canonical transaction을 rollback하지 않습니다.
+
+현재 구현의 한계는 명확합니다.
+
+- 메모리 큐에 남은 snapshot 작업은 프로세스 재시작 시 잃을 수 있습니다.
+- DB task row, durable retry, 자동 recovery scanner는 없습니다.
+- 따라서 “core publish 성공”과 “대시보드·통계 snapshot 완료”는 같은 상태가 아닙니다.
+
+이 한계를 해결하려면 다음 스키마 변경에서 `(sync_run_id, task_type)` unique task, status, attempt, lease, error, completed generation을 추가해야 합니다. 이번 작업 기록에서는 이를 현재 적용 기능으로 서술하지 않고 후속 설계로 남깁니다.
+
+## 7. 통합재고 조회 화면의 실제 구조
+
+### 7.0 API와 코드 책임
+
+현재 조회 API와 동기화 API는 서로 다른 읽기·쓰기 계약을 가집니다.
+
+| 영역 | API·코드 경계 | 책임 |
+| --- | --- | --- |
+| 목록 | `GET /api/v1/inventories` | 검색·위험등급·판매처·페이지·정렬 조건으로 서버 페이지를 반환합니다. |
+| 요약 | `GET /api/v1/inventories/summary` | 현재 필터 범위의 합계·상태 요약을 반환합니다. |
+| 상세 | `GET /api/v1/inventories/{skuCode}/sales-points/{salesPointCode}` | SKU·판매처의 가격·원가·정책·잔량·위험 사유를 제공합니다. |
+| LOT | `GET /api/v1/inventories/{skuCode}/sales-points/{salesPointCode}/lots` | LOT별 수량과 날짜를 FEFO 관점으로 보여줍니다. |
+| 동기화 제출 | `POST /api/v1/inventory-sync-runs` | `clientRequestId`를 받아 `QUEUED` run을 생성합니다. |
+| 최근 실행 | `GET /api/v1/inventory-sync-runs/latest` | 현재 active 또는 최근 실행 상태를 반환합니다. |
+| 실행 상세 | `GET /api/v1/inventory-sync-runs/{syncRunId}` | phase·source별 count·오류·fencing 정보를 반환합니다. |
+| 데모 입력 | `POST /api/v1/inventory-source-demo/adjustments` | flag가 켜진 환경에서 source 수량 감소와 audit을 transaction으로 처리합니다. |
+
+BackEnd는 `feature/inventory`의 조회 controller와 `feature/inventorysync`의 제출·worker·publisher·risk writer를 분리합니다. FrontEnd는 `pages/inventory`가 URL·query를 조합하고, `features/inventory-filter`, `features/inventory-sync`, `widgets/inventory-detail-drawer`, `entities/inventory`, `entities/risk`가 화면 책임을 나눕니다. 이 분리는 “조회 화면이 동기화 DB transaction을 직접 알고 있어야 한다”는 결합을 피합니다.
+
+### 7.1 URL 상태를 목록 상태의 기준으로 사용했습니다
+
+FrontEnd는 FSD 구조를 따르고, `src/features/inventory-filter/model/filterState.js`가 검색어·필터·페이지·정렬·상세 SKU·판매처·탭을 URL query string으로 serialize/parse합니다.
+
+```text
+/inventory
+  ?search=김치
+  &riskGrade=DANGER
+  &page=2
+  &size=20
+  &detailSkuCode=SKU-001
+  &detailSalesPointCode=SP-01
+  &detailTab=lot
+```
+
+URL 상태를 선택한 이유는 다음과 같습니다.
+
+| 방식 | 장점 | 단점 | 판단 |
+| --- | --- | --- | --- |
+| 컴포넌트 local state | 구현이 빠릅니다. | 새로고침·공유·뒤로가기에 약합니다. | 상세 drawer와 목록 필터의 기준으로는 부족합니다. |
+| 전역 store | 여러 위젯이 쉽게 공유합니다. | URL과 동기화 로직이 추가됩니다. | 현재 요구보다 범위가 큽니다. |
+| URL query | 새로고침·공유·history가 자연스럽습니다. | 타입 변환과 기본값 정규화가 필요합니다. | 현재 선택입니다. |
+
+`InventoryPage.jsx`는 URL을 읽어 목록·요약·필터 query를 만들고, drawer는 `detailSkuCode`와 `detailSalesPointCode`를 이용해 deep link를 지원합니다. 목록과 상세가 서로 다른 임시 상태를 가지지 않도록 필터 입력과 서버 query key를 같은 URL 상태에서 파생합니다.
+
+### 7.2 TanStack Query cache와 페이지네이션
+
+목록은 서버 페이지네이션을 사용하고, 검색·위험등급·판매처·페이지·정렬을 query key에 포함합니다. 캐시 key가 달라지므로 서로 다른 필터 결과가 섞이지 않습니다. 동기화가 성공하면 목록·요약·상세·LOT·risk 관련 query만 무효화합니다. dashboard·statistics·forecast snapshot은 각자 갱신 주기를 가지므로 같은 invalidation으로 가정하지 않습니다.
+
+실행 상태 query는 현재 active-only adaptive polling입니다.
+
+| run 상태 | polling |
+| --- | --- |
+| `QUEUED` | 3초 |
+| `RUNNING` | 10초 |
+| terminal 상태 | 중지 |
+| 브라우저 background | polling 중지 |
+
+이 값은 성능 수치가 아니라 현재 코드에 구현된 정책입니다. ETag, SSE, generation 기반 targeted invalidation은 아직 현재 query contract에 포함하지 않았습니다.
+
+### 7.3 상세 drawer와 위험 사유
+
+상세 drawer는 Escape 닫기, focus trap, body scroll lock, 닫힌 뒤 이전 trigger로 focus 복원을 처리합니다. 이 기능은 시각적 동작보다 키보드 사용과 화면 reader 흐름을 보장하는 접근성 경계입니다.
+
+위험 사유는 `RISK_ASSESSMENT.reason_message`에 저장하고 `InventoryRiskReasonTooltip`이 표시합니다. FrontEnd는 위험도 규칙을 다시 계산하지 않고 서버가 저장한 사유를 tooltip으로 보여줍니다. `RiskExplanationPanel` 컴포넌트 파일이 존재하더라도 현재 drawer 경로에서 실제로 렌더링되는 active 경로와 구분해야 합니다.
+
+## 8. 위험도 산정: 무엇을 보고 어떤 등급을 선택하는가
+
+### 8.1 수량 의미
+
+`INVENTORY_BALANCE.on_hand_qty`는 현재 가용 수량이고, `reserved_qty`는 예약 수량입니다. `total_qty`는 `on_hand_qty + reserved_qty` 의미로 계산할 수 있지만, 위험도 계산에서 예약 수량을 다시 빼지 않습니다. 이미 가용 수량이 서비스 계약상 판매·출고 가능한 수량을 나타내기 때문입니다.
+
+예측의 기본 단위는 `SKU × sales point`입니다. SKU 전체 합산은 명시적으로 선택한 경우에만 사용합니다. `SALES_DAILY`는 학습 입력이고, forecast/risk API가 직접 조회하는 값은 `DEMAND_FORECAST`, 현재 가용 수량, 안전재고 정책, LOT 날짜입니다.
+
+### 8.2 계산식
+
+`RiskRuleEngine`의 현재 규칙 버전은 `v1.1.0`입니다.
+
+```text
+projectedAvailable(D+n) = max(on_hand_qty - predicted_qty_D+n, 0)
+shortage30              = max(predicted_qty_D30 - on_hand_qty, 0)
+safetyGap               = max(safety_stock - projectedAvailable(D+7), 0)
+```
+
+판정 우선순위는 `CRITICAL > WARNING > NORMAL > GOOD`입니다.
+
+| 조건 | 판정 |
+| --- | --- |
+| D+7 projected available이 안전재고보다 작음 | `CRITICAL` |
+| LOT 유통기한이 30일 이내 | `CRITICAL` |
+| 현재 수량이 안전재고보다 작음 | `WARNING` |
+| D+30 수요가 가용 수량을 초과 | `WARNING` |
+| LOT 유통기한 31~90일 | `WARNING` |
+| LOT 유통기한 91~180일 | `NORMAL` |
+| 위 조건이 없고 입력이 유효함 | `GOOD` |
+
+LOT 만료·판매중지·보유일도 위험 사유에 포함됩니다. 여러 조건이 동시에 맞으면 우선순위가 높은 등급을 선택하고, `reason_message`에는 `assessmentStatus`, rule version, rule code, 핵심 이유와 산식을 저장합니다.
+
+### 8.3 누락 데이터는 안전으로 보정하지 않습니다
+
+예측·현재 수량·안전재고·LOT 중 필수 입력이 없거나 음수이면 `UNASSESSED` 또는 `STALE` 상태로 반환합니다. 이 경우 “위험이 없다”는 뜻인 `SAFE`/`GOOD`으로 fallback하지 않습니다.
+
+DB의 `risk_grade` 제약은 `CRITICAL`, `WARNING`, `NORMAL`, `GOOD`만 허용합니다. 따라서 `InventorySyncRiskWriter`는 저장 시 DB grade 제약을 만족하는 값을 기록하되, 실제 평가 상태와 이유는 `reason_message`에 포함합니다. API mapping은 `CRITICAL→DANGER`, `WARNING→CAUTION`, `NORMAL→NORMAL`, `GOOD→SAFE`입니다.
+
+입력 누락으로 `UNASSESSED` 또는 `STALE`이 된 결과도 DB에는 별도의 grade 값으로 저장할 수 없기 때문에 writer가 `WARNING` grade를 사용하고, 실제 상태는 `reason_message`의 접두부에 보존합니다. 화면·API가 이 값을 단순히 `CAUTION`으로만 해석하지 않도록 assessment status와 사유를 함께 전달하는 계약이 필요합니다.
+
+| 계층 | 값 |
+| --- | --- |
+| RiskRuleEngine 평가 상태 | `ASSESSED`, `UNASSESSED`, `STALE` |
+| DB grade | `CRITICAL`, `WARNING`, `NORMAL`, `GOOD` |
+| API·화면 grade | `DANGER`, `CAUTION`, `NORMAL`, `SAFE` |
+
+이 구분을 하지 않으면 “입력 누락인데 안전으로 보인다”거나 “DB WARNING이 API CAUTION인지”를 설명할 수 없습니다. 프론트엔드가 직접 계산하지 않고 서버 reason을 표시하도록 한 이유도 규칙 버전을 한곳에 두기 위해서입니다.
+
+### 8.4 다른 위험도 설계와의 비교
+
+| 방식 | 장점 | 단점 | 선택 |
+| --- | --- | --- | --- |
+| 단순 재고 일수 | 설명이 쉽습니다. | 수요예측·안전재고·LOT를 반영하기 어렵습니다. | 선택하지 않았습니다. |
+| 규칙 기반 수량·예측·LOT | 입력과 판정 이유를 재현할 수 있습니다. | 규칙 버전과 경계값을 관리해야 합니다. | 현재 선택입니다. |
+| ML 단독 등급 | 복잡한 패턴을 학습할 수 있습니다. | 근거·재현성·누락 데이터 처리가 어렵습니다. | 현재 범위에서는 선택하지 않았습니다. |
+| 운영자가 수동 입력 | 예외를 바로 반영할 수 있습니다. | 일관성과 자동화가 떨어집니다. | 자동 판정의 보조 수단으로만 검토합니다. |
+
+## 9. 원천 동기화 시연과 `INVENTORY_DEMO_ADJUSTMENT`
+
+시연에서 원천 수량을 감소시켜 동기화 결과와 위험도 변화를 보여주기 위해 demo adjustment API를 사용합니다. 이 테이블은 canonical 업무 테이블이 아니라 원천 current 변화의 audit입니다.
+
+```text
+demo adjustment 요청
+        ↓
+source state + source row FOR UPDATE
+        ↓
+수량 감소·row version 증가·record hash 갱신
+        ↓
+INVENTORY_DEMO_ADJUSTMENT audit INSERT
+        ↓ commit
+동기화 버튼
+        ↓
+changed candidate → canonical publish → risk 재평가
+```
+
+수량 컬럼만 직접 UPDATE하면 hash·version·중복 요청·감사 이력이 어긋날 수 있습니다. 이 테이블을 제거하고 같은 시연을 유지하려면 중복 요청과 audit을 다른 저장소에 옮기고 source change contract를 다시 구현해야 합니다. 따라서 현재 라이브 시연에서는 삭제 대상이 아니라 demo flag가 꺼져 있을 때 운영 경로에 노출되지 않는 보조 테이블로 유지합니다.
+
+| 방법 | 장점 | 문제 |
+| --- | --- | --- |
+| 수량만 직접 UPDATE | 가장 빠릅니다. | sync가 변경을 놓치거나 일관성 검증과 audit이 어긋날 수 있습니다. |
+| 수량·hash·version 직접 UPDATE | 테이블을 추가하지 않습니다. | 멱등성·호출 제한·감사 로직을 별도로 만들어야 합니다. |
+| demo adjustment API | 변경 기준과 audit을 한 transaction에서 처리합니다. | demo 전용 스키마·설정이 필요합니다. |
+
+## 10. 구현하지 않은 것과 범위를 넓히지 않은 이유
+
+다음 항목은 코드에 구현된 기능처럼 쓰면 안 됩니다.
+
+| 항목 | 현재 상태 |
+| --- | --- |
+| DB durable snapshot task | 미구현. 현재는 in-memory executor입니다. |
+| 자동 recovery scanner | 미구현. 운영자 호출 recovery service가 있습니다. |
+| ETag `304` | 미구현. active polling은 적용되어 있습니다. |
+| SSE 완료 알림 | 미구현. 후속 notification transport 후보입니다. |
+| canonical 신규 상품 자동 생성 | 미구현. row map이 없으면 전체 run을 중단합니다. |
+| 원천 삭제의 canonical 삭제 전파 | 미구현. 삭제 정책과 생명주기 결정이 필요합니다. |
+| 부분 성공 publish | 미구현. 현재 매핑 오류 하나라도 전체 run을 실패시킵니다. |
+| 운영 성능 개선 수치 | 측정 근거 없음. p95·lock wait·처리량 기준선을 먼저 수집해야 합니다. |
+
+범위를 좁힌 이유는 재고 데이터에서 “자동으로 추측해 반영”하는 것이 “반영하지 않고 실패”하는 것보다 위험하기 때문입니다. 기존 canonical row와 row map이 확인된 행만 갱신하고, 새 상품·삭제·부분 성공은 별도 정책으로 남겼습니다.
+
+## 11. 테스트와 검증 체크리스트
+
+### 데이터 생성
+
+```bash
+cd dummy-data
+node scripts/generate_inventory_source_current.mjs --verify
+```
+
+- baseline input checksum이 일치하는지 확인합니다.
+- 네 source current count와 총합을 확인합니다.
+- row map count와 source row count가 일치하는지 확인합니다.
+- generated SQL과 manifest checksum을 확인합니다.
+
+### BackEnd
+
+```bash
+cd BackEnd
+./gradlew test --tests '*inventory*'
+```
+
+검증할 핵심 시나리오는 다음과 같습니다.
+
+- 같은 `clientRequestId` 재전송이 중복 run을 만들지 않는지
+- 같은 ID에 다른 요청을 보내면 `409`인지
+- active scope가 있으면 두 번째 run을 막는지
+- source version이 scan 도중 바뀌면 publish하지 않는지
+- mapping 오류가 있으면 전체 run이 실패하는지
+- stale fencing token이 canonical write를 수행하지 못하는지
+- publish와 risk write가 같은 core transaction에 묶이는지
+- demo adjustment가 같은 요청으로 두 번 차감되지 않는지
+
+### FrontEnd
+
+```bash
+cd FrontEnd
+npm test -- --run
+npm run build
+```
+
+- URL 필터와 상세 deep link가 새로고침 후 유지되는지
+- 목록·요약·상세·LOT query가 올바른 key를 갖는지
+- 동기화 상태가 `QUEUED 3초 / RUNNING 10초`로 polling되는지
+- terminal 상태에서 polling이 멈추는지
+- Escape, focus trap, focus restore가 동작하는지
+- 서버의 risk reason을 tooltip으로 표시하고 클라이언트가 재계산하지 않는지
+
+## 12. 최종 정리
+
+이 기능의 핵심 구현은 “네 원천 테이블을 하나로 합쳤다”가 아닙니다. 네 원천 current를 보존하면서 SQL projection으로 공통 의미를 만들고, `ROW_MAP`으로 기존 업무 행을 명시적으로 연결한 뒤, typed record·hash·source version·fencing token·transaction으로 안전하게 publish하는 경계를 만든 것입니다.
+
+작업 결과를 한 줄씩 기억하면 다음과 같습니다.
+
+1. 원천의 컬럼명과 계약은 원천 current에 남깁니다.
+2. 서비스가 이해할 필드와 타입은 projection과 `CanonicalInventoryRecord`에서 맞춥니다.
+3. 원천 행과 canonical 행의 관계는 `INVENTORY_SOURCE_ROW_MAP`에서 결정합니다.
+4. `record_hash`는 변경 후보를 찾고, `current_version`은 읽기 일관성을 확인합니다.
+5. 제출은 짧은 transaction과 Oracle guard로 중복 실행을 막습니다.
+6. worker는 500행 page와 Spring Batch로 읽고, publish는 별도 transaction으로 묶습니다.
+7. 위험도는 수량·예측·안전재고·LOT를 규칙 버전으로 평가하고, 사유와 산식을 DB에 남깁니다.
+8. 화면은 URL 상태·TanStack Query·active polling으로 서버 상태를 관찰합니다.
+9. dashboard/statistics durable task·SSE·ETag·자동 recovery는 현재 코드가 아닌 후속 설계입니다.
+
+이 구분을 지키면 공개 기술 글에서는 적용된 기능만 설명하고, 내부 포트폴리오 기록에서는 선택하지 않은 대안과 다음 설계까지 분리해 이어갈 수 있습니다.
