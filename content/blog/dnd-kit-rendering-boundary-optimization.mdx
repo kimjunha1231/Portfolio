@@ -138,7 +138,7 @@ const KanbanCard = memo(function KanbanCard({
 
 `React.memo`를 적용해도 리렌더링이 줄지 않았기 때문에, 모든 카드에서 호출하고 있던 `useSortable`의 내부 동작을 확인하기로 했다.
 
-프로젝트에서는 `@dnd-kit/core 6.3.1`과 `@dnd-kit/sortable 10.0.0`을 사용했다. 해당 버전의 [`dnd-kit` Sortable 공식 문서](https://dndkit.com/legacy/presets/sortable/use-sortable/)에서도 상위 `SortableContext`에 아이템 목록을 전달하고, 각 카드에서 `useSortable`을 호출하는 구조를 안내하고 있었다.
+프로젝트에서는 `dnd-kit` 라이브러리를 사용했다. [`dnd-kit` Sortable 공식 문서](https://dndkit.com/legacy/presets/sortable/use-sortable/)에서도 상위 `SortableContext`에 아이템 목록을 전달하고, 각 카드에서 `useSortable`을 호출하는 구조를 안내하고 있었다.
 
 ```tsx
 import {DndContext} from "@dnd-kit/core";
