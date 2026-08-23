@@ -154,6 +154,8 @@ SELECT display_product_title AS product_name,
 
 이 결과를 받는 `CanonicalInventoryRecord`는 DB staging table에 저장하지 않는 메모리 전용 record입니다. 생성자에서 `productId`, `skuId`, `warehouseId`, `lotId`, `inventoryBalanceId`가 양수인지, 수량이 음수가 아닌지, `reservedQty`가 `onHandQty`보다 크지 않은지 검사합니다. 검증을 통과하지 못한 행은 임의의 기본값으로 publish하지 않습니다.
 
+아래 코드는 실제 `CanonicalInventoryRecord` 전체 필드 중 이 글에서 설명하는 ID·수량 검증 부분만 줄여 옮긴 예시입니다. 실제 record에는 `categoryId`, `salesPointId`, 가격·원가·LOT·정책 필드와 원천 버전 정보가 함께 들어 있습니다.
+
 ```java
 public record CanonicalInventoryRecord(
     String sourceType,
@@ -175,6 +177,9 @@ public record CanonicalInventoryRecord(
         }
         if (onHandQty == null || onHandQty.signum() < 0) {
             throw new IllegalArgumentException("onHandQty must be non-negative");
+        }
+        if (reservedQty == null || reservedQty.signum() < 0) {
+            throw new IllegalArgumentException("reservedQty must be non-negative");
         }
         if (reservedQty.compareTo(onHandQty) > 0) {
             throw new IllegalArgumentException("reservedQty must not exceed onHandQty");
@@ -243,7 +248,7 @@ source_type + source_record_key
 </figure>
 </div>
 
-현재 초기 매핑은 `INITIAL_EXACT`와 `MAPPED` 상태를 사용합니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
+현재 초기 매핑은 `mapping_method = INITIAL_EXACT`, `mapping_status = MAPPED` 조합으로 기록합니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
 
 ## 초기 fixture는 운영 기능과 분리합니다
 
