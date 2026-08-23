@@ -5,12 +5,38 @@ import { getVideoBySlug } from "@/lib/videos";
 interface VideoLinkProps {
   slug: string;
   caption?: string;
+  /** Render the video player in place instead of linking to the video detail page. */
+  inline?: boolean;
 }
 
-export default function VideoLink({ slug, caption }: VideoLinkProps) {
+export default function VideoLink({ slug, caption, inline = false }: VideoLinkProps) {
   const video = getVideoBySlug(slug);
 
   if (!video) return null;
+
+  if (inline) {
+    return (
+      <figure className="my-6 min-w-0">
+        <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+          <video
+            controls
+            playsInline
+            preload="metadata"
+            poster={video.thumbnail}
+            aria-label={video.title}
+            className="block aspect-video w-full bg-black object-contain"
+          >
+            <source src={video.src} type="video/mp4" />
+            브라우저가 HTML5 영상을 지원하지 않습니다.
+          </video>
+          <div className="border-t border-card-border px-4 py-3 text-sm font-medium text-foreground">
+            {video.title}
+          </div>
+        </div>
+        {caption && <figcaption>{caption}</figcaption>}
+      </figure>
+    );
+  }
 
   return (
     <figure className="my-6 min-w-0">

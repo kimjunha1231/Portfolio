@@ -36,8 +36,8 @@ JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 �
 이 수치는 당시의 개선 전과 최종 개선 후 구현을 비교한 결과다. 두 구현 사이에는 DnD 라이브러리뿐 아니라 React 버전, React Compiler 적용 여부, 컴포넌트 경계도 함께 달라졌기 때문에 특정 라이브러리 하나의 성능만 비교한 측정값으로 볼 수는 없다. 이후 같은 데이터와 실행 환경에서 `dnd-kit`을 유지한 실험을 다시 진행해 각 변경의 역할을 나누어 확인했다.
 
 <div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
-  <VideoLink slug="jobsecretary-before" caption="개선 전 · 카드 드래그 동작" />
-  <VideoLink slug="jobsecretary-after" caption="개선 후 · 카드 드래그 동작" />
+  <VideoLink slug="jobsecretary-before" caption="개선 전 · 카드 드래그 동작" inline />
+  <VideoLink slug="jobsecretary-after" caption="개선 후 · 카드 드래그 동작" inline />
 </div>
 
 <div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
@@ -315,7 +315,7 @@ const KanbanCardContent = memo(function KanbanCardContent({
 아래 영상은 공고 정보와 위치 정보를 분리하고 `React.memo`를 적용한 뒤, 같은 카드 목록에서 다시 확인한 결과다. 영향을 받지 않은 카드의 콘텐츠를 다시 계산하는 비용은 줄일 수 있었지만, React Developer Tools의 컴포넌트별 렌더링 표시에는 움직이지 않은 카드의 `KanbanCard`도 반복해서 나타났다.
 
 <div className="not-prose my-6">
-  <VideoLink slug="jobsecretary-dnd-kit-separated" />
+  <VideoLink slug="jobsecretary-dnd-kit-separated" inline />
 </div>
 
 ## 라이브러리 변경을 결정한 이유

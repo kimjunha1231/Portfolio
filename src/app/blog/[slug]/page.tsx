@@ -1,6 +1,5 @@
 import React from "react";
 import Link from "next/link";
-import Image from "next/image";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
@@ -102,13 +101,12 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
       {post.cover && (
         <figure className="mb-12 overflow-hidden rounded-3xl border border-card-border bg-foreground/5">
           <div className="relative aspect-[1.91]">
-            <Image
+            <ZoomableImage
               src={post.cover}
               alt={post.coverAlt || `${post.title} 대표 이미지`}
-              fill
-              priority
               sizes="(max-width: 896px) 100vw, 896px"
-              className={post.coverFit === "contain" ? "object-contain p-10" : "object-cover"}
+              loading="eager"
+              className={post.coverFit === "contain" ? "h-full w-full object-contain p-10" : "h-full w-full object-cover"}
             />
           </div>
           <figcaption className="sr-only">{post.coverAlt || `${post.title} 대표 이미지`}</figcaption>
@@ -119,7 +117,11 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
         <MDXRemote
           source={post.content}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
-          components={{ VideoLink, ZoomableImage }}
+          components={{
+            img: ZoomableImage,
+            VideoLink,
+            ZoomableImage,
+          }}
         />
       </div>
 
