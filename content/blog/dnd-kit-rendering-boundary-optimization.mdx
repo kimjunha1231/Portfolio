@@ -20,14 +20,14 @@ JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 �
 
 ## 개선 결과
 
-먼저 개선 전과 후의 결과는 다음과 같았다.
+개선 전과 후의 결과는 다음과 같았다.
 
 | 항목 | 변경 전 | 변경 후 | 변화 |
 | --- | ---: | ---: | ---: |
 | 한 번의 드래그에서 발생한 Profiler 전체 커밋 | 271회 | 98회 | **63.8% 감소** |
 | 영향을 받지 않은 카드에 표시된 렌더링 횟수 | 약 268~269회 | 0회 | 반복 실행 제거 |
 
-개선 전 영상을 보면 드래그 중인 카드 이외의 영향을 받지 않은 카드에도 268~269회의 렌더링이 표시되고, Profiler에는 총 271번의 커밋이 기록되어 있다.
+개선 전 영상에서는 드래그 중인 카드 이외의 영향을 받지 않은 카드에도 268~269회의 렌더링이 표시되고, Profiler에는 총 271번의 커밋이 기록되어 있다.
 
 <blockquote>
   측정 시나리오: 로컬 개발 환경에서 같은 칸반 카드 목록의 카드를 드래그해 다른 위치에 놓는 과정. Profiler의 전체 커밋 수와 React Developer Tools가 각 컴포넌트에 표시한 렌더링 횟수를 구분해 기록했다.
@@ -66,9 +66,9 @@ JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 �
 
 ## 첫 번째 가설: `React.memo`로 메모이제이션하면 해결될까?
 
-문제를 확인한 뒤 가장 먼저 `React.memo`를 시도했다. 드래그 중인 카드 이외의 카드 데이터는 바뀌지 않았기 때문에, 상위 컴포넌트의 렌더링이 영향을 주고 있다면 카드 컴포넌트를 메모이제이션하는 것만으로 막을 수 있다고 생각했다.
+문제를 확인한 뒤 `React.memo`를 시도했다. 드래그 중인 카드 이외의 카드 데이터는 바뀌지 않았기 때문에, 상위 컴포넌트의 렌더링이 영향을 주고 있다면 카드 컴포넌트를 메모이제이션하는 것만으로 막을 수 있다고 생각했다.
 
-그래서 기존 `KanbanCard`를 `React.memo`로 감싸고 다시 확인했지만, 기대와 달리 영향을 받지 않은 카드의 반복 실행은 사라지지 않았다.
+기존 `KanbanCard`를 `React.memo`로 감싸고 다시 확인했지만, 기대와 달리 영향을 받지 않은 카드의 반복 실행은 사라지지 않았다.
 
 
 ## 비슷한 사례와 원인 찾기
@@ -185,7 +185,7 @@ function SortableList({items}) {
 
 ## 라이브러리 내부 코드 분석
 
-이 정렬 기능의 데이터 전파 구조를 단순화하면 다음과 같다.
+정렬 기능의 데이터 전파 구조를 단순화하면 다음과 같다.
 
 ```text
 DndContext - active·over·요소 위치와 드래그 이벤트를 관리한다.
@@ -257,9 +257,9 @@ export function useSortable({id}: Arguments) {
 
 이 코드는 실제로 사용한 `@dnd-kit/sortable 10.0.0`의 [`useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)에서 구독 구조만 단순화한 것이다.
 
-따라서 프로젝트에서 각 카드를 렌더링하던 `KanbanCard`는 내부의 `useSortable`을 통해 여러 드래그 상태를 직접 구독하고 있었다. `React.memo`는 부모로부터 전달받은 Props가 바뀌지 않았을 때 컴포넌트의 실행을 건너뛰지만, 컴포넌트 내부에서 `useContext`로 구독하는 값의 변경까지 막아주지는 않는다. 따라서 상위 `DndContext`나 `SortableContext`가 제공하는 값이 바뀌면, 이를 구독하는 `KanbanCard`는 Props가 그대로여도 다시 실행된다. 기존 구조에서는 모든 카드가 `useSortable`을 사용하고 있었기 때문에, 드롭 대상이나 정렬 인덱스가 바뀌는 동안 영향을 받지 않은 카드에도 리렌더링이 발생하고 있었다.
+프로젝트에서 각 카드를 렌더링하던 `KanbanCard`는 내부의 `useSortable`을 통해 여러 드래그 상태를 직접 구독하고 있었다. `React.memo`는 부모로부터 전달받은 Props가 바뀌지 않았을 때 컴포넌트의 실행을 건너뛰지만, 컴포넌트 내부에서 `useContext`로 구독하는 값의 변경까지 막아주지는 않는다. 따라서 상위 `DndContext`나 `SortableContext`가 제공하는 값이 바뀌면, 이를 구독하는 `KanbanCard`는 Props가 그대로여도 다시 실행된다. 기존 구조에서는 모든 카드가 `useSortable`을 사용하고 있었기 때문에, 드롭 대상이나 정렬 인덱스가 바뀌는 동안 영향을 받지 않은 카드에도 리렌더링이 발생하고 있었다.
 
-기존 구조에서는 드래그 대상이나 위치가 바뀌는 과정에서 영향을 받지 않은 카드까지 반복해서 실행되었고, 같은 `KanbanCard` 안에 있던 회사명·직무·마감일 같은 공고 정보도 함께 다시 계산되고 있었다.
+기존 구조에서는 드래그 대상이나 위치가 바뀌는 과정에서 영향을 받지 않은 카드까지 반복해서 실행되었고, 같은 `KanbanCard` 안에 있던 회사명·직무·마감일 같은 공고 정보도 함께 다시 계산됐다.
 
 ---
 
@@ -269,11 +269,11 @@ export function useSortable({id}: Arguments) {
 
 기존 구조에서는 `useSortable`이 `dnd-kit` 내부의 정렬 상태와 드래그 상태를 구독하고 있었고, 이 훅을 호출하는 `KanbanCard`가 채용 정보와 같이 바뀌지 않는 카드 콘텐츠까지 함께 렌더링하고 있었다.
 
-따라서 위치와 정렬 정보를 구독하는 부분은 유지하되, 그 과정에서 함께 리렌더링되는 변경되지 않은 채용 정보 영역을 분리해 불필요한 렌더링을 줄이고자 했다.
+위치와 정렬 정보를 구독하는 부분은 유지하되, 그 과정에서 함께 리렌더링되는 변경되지 않은 채용 정보 영역을 분리해 불필요한 렌더링을 줄이고자 했다.
 
 ## `dnd-kit`을 유지한 채 컴포넌트를 나눠보기
 
-먼저 `dnd-kit`을 유지한 채 컴포넌트 분리를 시도했다. `useSortable`은 바깥쪽 `KanbanCard`에서만 호출하고, 회사명·직무·마감일을 렌더링하는 부분은 `KanbanCardContent`로 분리해 `React.memo`를 적용했다.
+`dnd-kit`을 유지한 채 컴포넌트 분리를 시도했다. `useSortable`은 바깥쪽 `KanbanCard`에서만 호출하고, 회사명·직무·마감일을 렌더링하는 부분은 `KanbanCardContent`로 분리해 `React.memo`를 적용했다.
 
 ```tsx
 const KanbanCard = memo(function KanbanCard({application, onDelete}: Props) {
@@ -326,7 +326,7 @@ const KanbanCardContent = memo(function KanbanCardContent({
 - 영향을 받지 않은 카드에 상태 업데이트가 전달되는 범위를 줄일 수 있는가
 - 네 개의 세로 목록으로 구성된 현재 칸반보드에 적합한가
 
-자유 배치나 2차원 그리드에는 적합하지 않지만, 우리 서비스에서는 네 개의 세로 목록 사이에서 카드를 이동하는 기능만 필요했기 때문에 충분하다고 생각했다. 그래서 현재 칸반보드에 필요한 조건을 충족하는 `@hello-pangea/dnd`로 변경하게 되었다.
+자유 배치나 2차원 그리드에는 적합하지 않지만, 우리 서비스에서는 네 개의 세로 목록 사이에서 카드를 이동하는 기능만 필요했기 때문에 충분하다고 생각했다. 현재 칸반보드에 필요한 조건을 충족하는 `@hello-pangea/dnd`로 변경하게 되었다.
 
 ## 항목별 상태 구독과 Render Props
 
@@ -334,7 +334,7 @@ const KanbanCardContent = memo(function KanbanCardContent({
 
 `Render Props`는 컴포넌트가 JSX를 직접 정해 렌더링하는 대신, JSX를 반환하는 함수를 Prop으로 받아 필요한 데이터를 그 함수의 인자로 전달하는 패턴이다. `children`에 함수를 전달하는 방식도 Render Props에 포함되며, 상태와 동작을 관리하는 컴포넌트와 실제로 그릴 UI를 분리할 수 있다. [Render Props 패턴 설명](https://patterns-dev-kr.github.io/design-patterns/render-props-pattern/)
 
-`@hello-pangea/dnd`의 `Draggable`은 이 패턴을 사용해 `provided`와 `snapshot`을 자식 함수에 전달한다. 따라서 라이브러리는 드래그 상태와 연결 정보를 관리하고, 애플리케이션은 기존 카드 UI에서 필요한 DOM 구조를 직접 결정할 수 있다.
+`@hello-pangea/dnd`의 `Draggable`은 이 패턴을 사용해 `provided`와 `snapshot`을 자식 함수에 전달한다. 라이브러리는 드래그 상태와 연결 정보를 관리하고, 애플리케이션은 기존 카드 UI에서 필요한 DOM 구조를 직접 결정할 수 있다.
 
 ```tsx
 <Draggable draggableId={application.id} index={index}>
@@ -351,7 +351,7 @@ const KanbanCardContent = memo(function KanbanCardContent({
 
 ## 드래그 연결과 카드 콘텐츠를 나누기
 
-앞의 Render Props 코드에서 `snapshot.isDragging`을 `isDragging` Prop으로 전달하고, `provided`는 드래그 가능한 DOM에 연결한다. 회사명·직무·마감일·상태 배지는 카드 데이터만으로 렌더링하도록 나눴다. 구조의 핵심은 다음과 같다.
+Render Props 코드에서 `snapshot.isDragging`을 `isDragging` Prop으로 전달하고, `provided`는 드래그 가능한 DOM에 연결한다. 회사명·직무·마감일·상태 배지는 카드 데이터만으로 렌더링하도록 나눴다. 핵심 구조는 다음과 같다.
 
 ```tsx
 const KanbanCardContent = memo(function KanbanCardContent({
@@ -416,7 +416,7 @@ if (isDragging && typeof document !== "undefined") {
 return card;
 ```
 
-`createPortal`은 React 트리와의 관계는 유지한 채, DOM 트리에서 렌더링되는 물리적 위치만 바꾸는 기능이다. 이를 활용해 드래그 중인 카드를 기존 부모 DOM에서 분리하고, 부모 요소의 CSS 영향을 받아 UI가 깨지는 문제를 해결할 수 있었다.
+`createPortal`은 React 트리와의 관계는 유지한 채, DOM 트리에서 렌더링되는 물리적 위치만 바꾸는 기능이다. 이를 활용해 드래그 중인 카드를 기존 부모 DOM에서 분리하고, 부모 요소의 CSS 영향을 받아 UI가 깨지는 문제를 해결했다.
 
 ## 같은 데이터와 시나리오로 다시 확인하기
 
