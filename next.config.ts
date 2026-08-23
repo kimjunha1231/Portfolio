@@ -14,6 +14,20 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // 개발 중에는 이미지 변환 워커가 메모리를 크게 사용하지 않도록 원본을 사용합니다.
+  // 배포 환경에서는 Next Image 최적화를 다시 활성화합니다.
+  images: {
+    unoptimized: process.env.NODE_ENV === "development",
+  },
+  async redirects() {
+    return [
+      {
+        source: "/blog/jobsecretary-kanban-rendering-optimization",
+        destination: "/projects/jobsecretary",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -38,6 +52,14 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/blog/:slug",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/videos",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/videos/:slug",
         headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
       },
     ];

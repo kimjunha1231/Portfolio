@@ -31,9 +31,8 @@ function checkFile(filePath) {
 
   // 3. Image Alt text check
   const imgWithoutAltRegex = /!\[\s*\]\((.*?)\)/g;
-  let match;
   let missingAltCount = 0;
-  while ((match = imgWithoutAltRegex.exec(content)) !== null) {
+  while (imgWithoutAltRegex.exec(content) !== null) {
     missingAltCount++;
   }
   if (missingAltCount > 0) {
@@ -50,6 +49,14 @@ function checkFile(filePath) {
   const hasHeadings = /^#{2,3}\s+.+/m.test(content);
   if (!hasHeadings && textOnly.length > 500) {
     warnings.push("No H2/H3 headings found in body text");
+  }
+
+  // 6. Video watch page check
+  const directVideoCount = (content.match(/<video\b/gi) || []).length;
+  if (directVideoCount > 0) {
+    issues.push(
+      `Found ${directVideoCount} direct video embed(s); use a VideoLink to a dedicated watch page`,
+    );
   }
 
   return { fileName, issues, warnings };

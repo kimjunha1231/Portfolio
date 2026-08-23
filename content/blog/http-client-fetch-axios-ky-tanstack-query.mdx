@@ -1,0 +1,918 @@
+---
+title: "Fetch·Axios·Ky 비교와 TanStack Query 조합 설계: HTTP 요청과 서버 상태를 나누는 법"
+date: "2026-08-07"
+lastModified: "2026-08-07"
+published: false
+section: "기술 노트"
+category: "HTTP / Server State"
+tags: ["Fetch", "Axios", "Ky", "TanStack Query", "React", "HTTP", "Server State", "TypeScript"]
+description: "Fetch, Axios, Ky가 맡아 온 HTTP 통신의 역할과 사용법, 장단점을 비교하고 TanStack Query가 대체하는 영역과 중복되는 영역, 상황별 조합과 설계 방법을 정리합니다."
+---
+
+`fetch`를 쓸지 `axios`를 쓸지, 요즘은 `ky`도 검토해야 하는지, 여기에 `TanStack Query`까지 추가하면 무엇이 중복되는지 헷갈리기 쉽습니다.
+
+결론부터 말하면 네 도구는 같은 층의 경쟁자가 아닙니다. `fetch`, `axios`, `ky`는 **HTTP 요청을 보내고 응답을 해석하는 전송 계층**에 있고, `TanStack Query`는 그 요청 결과를 **캐시하고, 여러 컴포넌트가 공유하고, 최신 상태로 동기화하는 서버 상태 계층**에 있습니다. 따라서 TanStack Query를 도입했다고 HTTP 클라이언트가 사라지는 것이 아니라, HTTP 클라이언트를 `queryFn` 안에서 계속 사용하게 됩니다.
+
+이 글은 2026년 8월 7일 기준의 공식 문서와 TanStack Query 메인테이너인 Dominik Dorfmeister(TkDodo)의 글을 바탕으로 다음 질문에 답합니다.
+
+- 기존 HTTP 통신 라이브러리들은 어떤 문제를 해결해 왔는가?
+- `fetch`, `axios`, `ky`는 각각 어떤 기능을 제공하고 어떻게 사용하는가?
+- 세 도구의 장점과 단점은 무엇이며 어떤 상황에 맞는가?
+- TanStack Query가 `axios`나 다른 HTTP 라이브러리의 무엇을 대체하고, 무엇과는 중복되는가?
+- React·Next.js 애플리케이션에서 어떤 조합과 파일 경계를 선택하면 좋은가?
+
+## 핵심 결론: 요청을 보내는 도구와 결과를 관리하는 도구를 분리합니다
+
+실무에서 가장 먼저 해야 할 일은 라이브러리 이름을 고르는 것이 아니라 책임을 나누는 것입니다.
+
+| 계층 | 해결하는 문제 | 대표 도구 | 소유해야 하는 책임 |
+| --- | --- | --- | --- |
+| 전송 계층 | HTTP 요청·응답, 헤더, 본문, 취소, 타임아웃 | `fetch`, `axios`, `ky` | URL과 메서드 구성, 직렬화, 응답·오류 변환 |
+| 서버 상태 계층 | 캐시, 중복 요청 제거, 재검증, 무효화, 낙관적 업데이트 | TanStack Query | `queryKey`, `staleTime`, `gcTime`, refetch, mutation |
+| 로컬 UI 상태 | 모달 열림, 입력 중인 값, 탭, 드래그 상태 | React state, Zustand 등 | 화면 상호작용과 임시 상태 |
+| 도메인 계층 | 사용자·주문·게시글 단위의 API 의미 | `usersApi`, `ordersApi` 등 직접 작성 | 엔드포인트, DTO, 오류 의미, 권한 흐름 |
+
+예를 들어 `useQuery`가 호출되는 흐름은 다음과 같습니다.
+
+```text
+컴포넌트
+  → useQuery({ queryKey, queryFn })
+    → queryFn
+      → fetch / axios / ky
+        → HTTP 서버
+      ← 응답·오류
+    ← 캐시·동기화·상태 변경
+  ← 화면 렌더링
+```
+
+TanStack Query 공식 문서도 이를 “서버 상태를 가져오고(fetch), 캐시하고(cache), 동기화하고(synchronize), 업데이트하는(update) 도구”로 설명합니다. 반면 TkDodo는 React Query가 실제 데이터를 가져오는 라이브러리가 아니며, `fetch`, `axios`, `ky` 같은 도구가 필요하다고 설명합니다. [TanStack Query Overview](https://tanstack.com/query/latest/docs/framework/react/overview), [React Query as a State Manager](https://tkdodo.eu/blog/react-query-as-a-state-manager)
+
+## HTTP 통신 라이브러리는 어떤 역할을 해 왔을까요?
+
+### XMLHttpRequest: 브라우저의 저수준 통신 API
+
+`XMLHttpRequest`(XHR)는 브라우저에서 HTTP 요청을 보내고 응답을 받는 오래된 기본 API입니다. 콜백 기반 이벤트와 `readyState`, `status`, `responseText`를 직접 다뤄야 했기 때문에 요청 하나를 처리하는 코드가 애플리케이션 로직과 쉽게 섞였습니다.
+
+XHR은 단순히 오래된 기술이라서 의미가 없는 것이 아닙니다. 업로드·다운로드 진행률처럼 브라우저의 세부 이벤트를 직접 관찰해야 할 때 여전히 유용한 기반 API입니다. 다만 일반적인 JSON API 호출에는 더 높은 수준의 추상화가 필요했습니다. [MDN XMLHttpRequest](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest)
+
+### jQuery.ajax와 여러 HTTP 클라이언트: 반복 코드를 줄이는 계층
+
+`jQuery.ajax`와 초기 HTTP 클라이언트들은 브라우저별 차이, JSON 파싱, 요청 옵션, 오류 처리를 한곳에 모으는 역할을 했습니다. 당시 개발자가 직접 작성하던 다음 작업을 공통화한 셈입니다.
+
+- 요청 상태를 이벤트로 감시하기
+- `Content-Type`과 응답 타입 지정하기
+- JSON 문자열을 객체로 변환하기
+- 성공·실패 콜백 분기하기
+- 공통 헤더와 인증 정보를 주입하기
+
+이 시기의 핵심 가치는 “서버 상태를 관리하는 캐시”가 아니라 **HTTP 요청을 애플리케이션에서 사용하기 좋은 형태로 감싸는 것**이었습니다.
+
+### Promise 기반 HTTP 클라이언트: 비동기 흐름을 애플리케이션 코드에 맞추다
+
+`fetch`는 브라우저 표준 Promise 기반 API로 XHR을 대체하는 방향을 제시했습니다. `axios`는 브라우저와 Node.js를 함께 고려한 일관된 클라이언트와 인터셉터·응답 스키마를 제공했습니다. `ky`는 `fetch` 위에 작은 API를 덧씌워 JSON 요청, HTTP 오류, 재시도, 훅을 간결하게 만들었습니다.
+
+세 도구의 공통 역할은 다음과 같습니다.
+
+1. URL과 HTTP 메서드를 구성합니다.
+2. 헤더와 요청 본문을 보냅니다.
+3. 응답 본문을 JSON·텍스트·파일 등으로 읽습니다.
+4. 네트워크 오류와 HTTP 상태 오류를 애플리케이션 오류로 전달합니다.
+5. 필요하면 취소, 타임아웃, 재시도, 인증 헤더를 처리합니다.
+
+반대로 캐시된 값을 언제 보여줄지, 여러 컴포넌트가 같은 요청을 어떻게 공유할지, 포커스 복귀 때 다시 가져올지는 원래 HTTP 클라이언트의 주된 책임이 아니었습니다. 이 지점에서 TanStack Query가 등장했습니다.
+
+## Fetch는 무엇을 제공하고 어떻게 사용할까요?
+
+### Fetch의 정체: 표준 API이지 완성형 API 클라이언트는 아닙니다
+
+Fetch API는 `Window`와 `Worker` 환경에서 사용할 수 있는 표준 전역 API이며 `Request`, `Response`, `Headers`, `AbortSignal` 같은 웹 표준 객체를 사용합니다. MDN은 Fetch를 XHR의 Promise 기반 대체 API로 설명합니다. [MDN Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
+
+가장 중요한 특징은 `fetch()`가 **404나 500 같은 HTTP 오류 상태만으로 Promise를 reject하지 않는다는 점**입니다. 네트워크 자체가 실패했을 때는 reject하지만, 서버가 정상적으로 응답한 404는 `Response`로 resolve합니다. 따라서 `response.ok` 또는 `response.status`를 직접 검사해야 합니다. [MDN Using the Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch)
+
+### 기본 GET 요청
+
+```ts
+type User = {
+  id: number;
+  name: string;
+};
+
+async function getUser(id: number): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+
+  if (!response.ok) {
+    throw new Error(`사용자 조회 실패: ${response.status}`);
+  }
+
+  return response.json() as Promise<User>;
+}
+```
+
+`fetch()`가 반환하는 값은 데이터 자체가 아니라 `Response`입니다. JSON을 사용하려면 `response.json()`을 한 번 더 호출해야 합니다. 또한 `response.json()`도 비동기 메서드이므로 `await`가 필요합니다.
+
+### JSON POST 요청
+
+```ts
+async function createUser(input: { name: string }): Promise<User> {
+  const response = await fetch("/api/users", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(`사용자 생성 실패: ${response.status}`);
+  }
+
+  return response.json() as Promise<User>;
+}
+```
+
+`fetch`는 일반 객체를 자동으로 JSON 문자열로 바꾸지 않습니다. `JSON.stringify`와 `Content-Type` 설정을 호출자가 담당해야 합니다. 이 명시성은 장점이면서 반복 코드의 원인이기도 합니다.
+
+### Fetch에서 오류를 표준화하는 작은 래퍼
+
+프로젝트에서 `fetch`를 직접 여러 번 호출하면 `response.ok` 검사와 오류 변환이 반복됩니다. 이때 전역 HTTP 클라이언트를 새로 도입하기보다 프로젝트 내부에 얇은 래퍼를 둘 수 있습니다.
+
+```ts
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body?: unknown,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export async function fetchJson<T>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...init?.headers,
+    },
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json")
+    ? await response.json().catch(() => undefined)
+    : await response.text().catch(() => undefined);
+
+  if (!response.ok) {
+    throw new ApiError(`HTTP ${response.status}`, response.status, body);
+  }
+
+  return body as T;
+}
+```
+
+이렇게 하면 `fetch`의 표준성과 작은 번들을 유지하면서도 프로젝트가 기대하는 오류 타입을 통일할 수 있습니다. 다만 이 래퍼에 인증 재발급, 재시도, 로깅, 파일 업로드, 여러 API 호스트까지 계속 추가하면 결국 직접 만든 Axios와 비슷한 추상화가 될 수 있습니다.
+
+### 취소와 타임아웃
+
+Fetch에는 `AbortController`를 사용해 요청을 취소할 수 있습니다.
+
+```ts
+const controller = new AbortController();
+
+const request = fetch("/api/report", {
+  signal: controller.signal,
+});
+
+setTimeout(() => controller.abort(), 5_000);
+
+await request;
+```
+
+Fetch의 `signal`은 취소에는 잘 맞지만, “5초가 지나면 자동으로 취소”라는 정책을 매 요청마다 직접 연결해야 합니다. 최근 브라우저와 Node.js에서는 `AbortSignal.timeout(5000)`을 사용할 수 있지만, 지원 환경이 다양하거나 여러 요청을 함께 취소해야 한다면 `AbortController`를 명시적으로 관리하는 편이 읽기 쉽습니다.
+
+### Fetch의 장점
+
+- 브라우저와 많은 서버 런타임에 기본 제공되어 별도 의존성이 없습니다.
+- `Request`, `Response`, `Headers`, `AbortSignal`, `ReadableStream` 같은 웹 표준과 자연스럽게 연결됩니다.
+- Next.js 같은 프레임워크의 서버 `fetch` 확장 기능과 통합하기 쉽습니다.
+- 필요한 동작만 직접 조합할 수 있어 동작을 숨기는 계층이 적습니다.
+
+### Fetch의 단점
+
+- HTTP 4xx·5xx가 자동으로 예외가 되지 않아 `response.ok` 검사가 필수입니다.
+- JSON 직렬화·역직렬화, 공통 헤더, base URL, 오류 클래스, 재시도를 직접 설계해야 합니다.
+- 인터셉터가 내장되어 있지 않아 공통 인증 갱신이나 로깅은 래퍼·함수 조합으로 구현해야 합니다.
+- 응답 타입은 런타임에서 검증되지 않습니다. TypeScript의 타입 단언만으로 서버 데이터가 안전해지는 것은 아닙니다.
+
+Fetch는 **표준 API를 바탕으로 얇고 예측 가능한 전송 계층을 직접 설계하고 싶은 경우**에 가장 좋은 출발점입니다.
+
+## Axios는 무엇을 제공하고 어떻게 사용할까요?
+
+### Axios의 정체: 일관된 API 클라이언트와 확장 지점
+
+Axios는 브라우저와 Node.js에서 사용할 수 있는 Promise 기반 HTTP 클라이언트입니다. 공식 문서는 메서드 별칭, 인스턴스, 요청 설정, 어댑터, 응답 스키마, 인터셉터, 오류 처리, 취소, 재시도 같은 기능을 별도 확장 지점으로 제공합니다. [Axios First Steps](https://axios-http.com/docs/intro)
+
+### 기본 GET과 응답 스키마
+
+```ts
+import axios from "axios";
+
+type User = {
+  id: number;
+  name: string;
+};
+
+const response = await axios.get<User>("/api/users/1");
+
+console.log(response.data);   // User
+console.log(response.status); // 200
+console.log(response.headers);
+```
+
+Axios 응답은 `data`, `status`, `statusText`, `headers`, `config`, `request`를 가진 일관된 응답 객체입니다. 기본적으로 2xx 응답은 resolve하고 그 밖의 상태는 reject하며, `validateStatus`로 이 기준을 바꿀 수 있습니다. [Axios Response Schema](https://axios.rest/pages/advanced/response-schema)
+
+이 차이는 Fetch와 비교하면 큽니다.
+
+```ts
+// fetch: 404도 Response로 resolve
+const response = await fetch("/api/missing");
+if (!response.ok) {
+  // 직접 throw 해야 함
+}
+
+// axios: 기본 설정에서는 404가 catch로 전달됨
+try {
+  await axios.get("/api/missing");
+} catch (error) {
+  // AxiosError의 response.status, response.data 등을 확인
+}
+```
+
+### 인스턴스로 API 경계 만들기
+
+```ts
+import axios from "axios";
+
+export const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  timeout: 10_000,
+  headers: {
+    Accept: "application/json",
+  },
+});
+
+export const usersApi = {
+  get: (id: number, signal?: AbortSignal) =>
+    api.get<User>(`/users/${id}`, { signal }).then((response) => response.data),
+};
+```
+
+인스턴스를 사용하면 API 호스트, 기본 타임아웃, 공통 헤더를 한곳에서 관리할 수 있습니다. 단, `baseURL`은 보안 경계가 아닙니다. 사용자 입력을 URL로 그대로 전달하지 말고 허용된 호스트와 경로를 별도로 검증해야 합니다. [Axios Request Config](https://axios.rest/pages/advanced/request-config)
+
+### 인터셉터: 요청과 응답의 공통 파이프라인
+
+Axios의 인터셉터는 Express 미들웨어와 비슷하게 요청이 전송되기 전과 응답이 반환된 뒤에 공통 로직을 실행합니다. 인증 헤더, 상관 ID, 로깅, 응답 변환, 토큰 만료 처리를 한곳에 모을 수 있습니다. [Axios Interceptors](https://axios-http.com/docs/interceptors)
+
+```ts
+api.interceptors.request.use((config) => {
+  const token = getAccessToken();
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  config.headers["X-Request-Id"] = crypto.randomUUID();
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      await refreshAccessTokenOnce();
+      return api(error.config);
+    }
+
+    return Promise.reject(error);
+  },
+);
+```
+
+토큰 갱신 인터셉터는 강력하지만, 구현이 단순하지 않습니다. 갱신 요청 자체가 다시 401이 되는 경우, 여러 요청이 동시에 만료되어 갱신 요청이 폭주하는 경우, 원래 요청 재시도 횟수를 제한하지 않는 경우를 반드시 처리해야 합니다. 인터셉터를 넣는 순간 “모든 API 호출의 숨은 제어 흐름”이 되므로 테스트와 로깅이 필요합니다.
+
+### 오류 처리
+
+Axios의 오류에는 `response`, `request`, `config`, `code`, `status` 같은 정보가 포함됩니다. 서버가 응답했는지, 요청은 나갔지만 응답이 없었는지, 요청 생성 단계에서 실패했는지를 구분하기 쉽습니다. [Axios Error Handling](https://axios.rest/pages/advanced/error-handling)
+
+```ts
+import axios from "axios";
+
+try {
+  await api.get("/users");
+} catch (error) {
+  if (axios.isAxiosError(error)) {
+    if (error.response) {
+      console.error("서버 응답 오류", error.response.status);
+    } else if (error.request) {
+      console.error("응답 없는 네트워크 오류");
+    } else {
+      console.error("요청 설정 오류", error.message);
+    }
+  }
+}
+```
+
+### 취소와 재시도
+
+Axios는 `AbortController`의 `signal`을 지원합니다. 과거 `CancelToken`은 deprecated 되었으므로 새 코드는 `AbortController`를 사용해야 합니다. [Axios Cancellation](https://axios.rest/pages/advanced/cancellation)
+
+```ts
+const controller = new AbortController();
+
+await api.get("/reports", {
+  signal: controller.signal,
+});
+
+controller.abort();
+```
+
+Axios의 재시도는 기본 요청 API의 핵심 기능이라기보다 인터셉터나 별도 패키지로 정책을 구성하는 방식에 가깝습니다. 공식 문서도 네트워크 오류·5xx·429와 `Retry-After`를 기준으로 인터셉터에서 제한 횟수와 exponential backoff를 직접 구현하는 예를 보여줍니다. [Axios Retry and Error Recovery](https://axios.rest/pages/advanced/retry)
+
+### Axios의 장점
+
+- 응답이 `response.data`로 바로 정리되고, 기본 HTTP 오류 정책이 명확합니다.
+- `baseURL`, 인스턴스, 기본 설정, 인터셉터로 대규모 API 클라이언트의 공통 정책을 만들기 쉽습니다.
+- `AxiosError`와 응답 스키마 덕분에 오류 처리와 디버깅 정보가 풍부합니다.
+- 브라우저·Node.js에서 오래 사용된 사례와 생태계가 많습니다.
+- 인증 갱신, 공통 헤더, 다중 API 호스트처럼 전송 계층의 정책이 복잡할 때 유리합니다.
+
+### Axios의 단점
+
+- 표준 `fetch`보다 API와 옵션이 많아 학습·번들·업그레이드 비용이 늘어날 수 있습니다.
+- 인터셉터에 인증 재발급과 재시도를 넣으면 흐름이 숨겨지고 무한 재귀·중복 재시도 위험이 생깁니다.
+- TanStack Query와 함께 쓰면 Axios의 재시도·캐시 유사 래퍼와 Query의 재시도가 겹치기 쉽습니다.
+- Fetch의 `Request`·`Response` 스트림 모델과 완전히 같은 방식으로 생각하면 어댑터 차이를 놓칠 수 있습니다.
+
+Axios는 **HTTP 정책 자체가 중요한 서비스**, 특히 인증·관찰성·다중 백엔드·레거시 호환이 복잡한 조직에서 선택할 이유가 충분합니다.
+
+## Ky는 무엇을 제공하고 어떻게 사용할까요?
+
+### Ky의 정체: Fetch를 유지하면서 반복 코드를 줄이는 얇은 클라이언트
+
+Ky는 `fetch` 기반의 작은 HTTP 클라이언트입니다. 공식 저장소는 `fetch`보다 단순한 API, 메서드 단축형, non-2xx 오류 처리, 재시도, JSON 옵션, 타임아웃, base URL, 인스턴스, 훅, Standard Schema 기반 응답 검증을 제공한다고 설명합니다. [Ky GitHub README](https://github.com/sindresorhus/ky)
+
+즉 Ky는 Axios의 대체품이면서 동시에 “Fetch에 필요한 기본 안전장치를 얹은 선택지”로 이해하는 편이 정확합니다. Axios처럼 독자적인 저수준 전송 모델을 만들기보다 Fetch 옵션과 `Response`를 계속 사용합니다.
+
+### 기본 GET과 JSON POST
+
+```ts
+import ky from "ky";
+
+type User = {
+  id: number;
+  name: string;
+};
+
+const user = await ky.get("/api/users/1").json<User>();
+
+const created = await ky
+  .post("/api/users", {
+    json: { name: "Junha" },
+  })
+  .json<User>();
+```
+
+Ky의 `.json()`은 응답을 기다린 뒤 다시 `response.json()`을 호출하는 단계를 줄여줍니다. `json` 옵션은 요청 본문을 `JSON.stringify`하고 적절한 헤더를 설정합니다. 또한 non-2xx 응답은 기본적으로 `HTTPError`로 예외가 됩니다.
+
+```ts
+try {
+  await ky.get("/api/missing").json();
+} catch (error) {
+  // HTTPError, NetworkError, TimeoutError 등을 구분할 수 있음
+}
+```
+
+단, 204 응답처럼 본문이 없는 성공 응답에 `.json()`을 호출하면 오류가 될 수 있습니다. 삭제 API처럼 본문이 없는 응답은 `ky.delete()` 자체만 await하거나 `.text()` 등 실제 응답 형태에 맞는 메서드를 선택해야 합니다. [Ky API: body methods](https://github.com/sindresorhus/ky#kyinput-options)
+
+### base URL, searchParams, 인스턴스
+
+```ts
+import ky from "ky";
+
+export const api = ky.create({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL,
+  headers: {
+    Accept: "application/json",
+  },
+  timeout: 10_000,
+  retry: {
+    limit: 2,
+  },
+});
+
+const users = await api
+  .get("users", {
+    searchParams: {
+      page: 1,
+      size: 20,
+    },
+  })
+  .json<User[]>();
+```
+
+Ky의 `baseUrl`과 `searchParams`는 URL 조립의 반복을 줄입니다. 다만 `baseUrl`과 `prefix`의 슬래시 규칙, 상대 경로와 절대 URL의 해석은 프로젝트에서 하나로 정해 두는 편이 좋습니다. [Ky options](https://github.com/sindresorhus/ky#options)
+
+### Hooks: Axios 인터셉터와 비슷하지만 Fetch 흐름에 맞는 확장 지점
+
+Ky는 `beforeRequest`, `beforeRetry`, `afterResponse`, `beforeError` 같은 훅을 제공합니다.
+
+```ts
+export const api = ky.create({
+  hooks: {
+    beforeRequest: [
+      ({ request }) => {
+        const token = getAccessToken();
+
+        if (token) {
+          request.headers.set("Authorization", `Bearer ${token}`);
+        }
+      },
+    ],
+    afterResponse: [
+      async ({ response }) => {
+        if (response.status === 401) {
+          await refreshAccessTokenOnce();
+        }
+      },
+    ],
+  },
+});
+```
+
+Ky의 훅은 Fetch의 `Request`와 `Response`를 직접 다루기 때문에 웹 표준 객체에 익숙한 팀이 이해하기 좋습니다. 반면 Axios 인터셉터처럼 토큰 갱신 후 원래 요청을 정교하게 재실행하는 구조는 직접 설계해야 하며, 훅이 알아서 인증 상태를 완성해 주는 것은 아닙니다.
+
+### 재시도와 타임아웃
+
+Ky는 재시도 가능한 메서드와 상태 코드를 기본으로 갖고 있으며, `Retry-After`와 backoff, jitter, timeout 재시도 여부를 설정할 수 있습니다. 공식 README에 따르면 기본 `retry.limit`은 2이고, 네트워크 오류 및 일부 408·429·5xx 상태를 대상으로 합니다. [Ky retry options](https://github.com/sindresorhus/ky#retry)
+
+```ts
+const data = await api
+  .get("reports/daily", {
+    timeout: 5_000,
+    retry: {
+      limit: 3,
+      methods: ["get"],
+      statusCodes: [408, 429, 500, 502, 503, 504],
+      retryOnTimeout: true,
+      jitter: true,
+    },
+  })
+  .json<Report>();
+```
+
+재시도는 모든 HTTP 요청에 자동으로 적용하면 안 됩니다. 결제 생성, 메시지 발송, 파일 업로드처럼 요청이 서버에 부작용을 만들 수 있는 작업은 idempotency key나 명시적인 재시도 정책 없이 반복하면 중복 처리될 수 있습니다. 특히 Ky는 재시도할 때 스트리밍 body를 복제하기 위해 메모리를 사용할 수 있으므로 대용량 스트리밍 업로드에서는 재시도를 끄는 편이 안전합니다.
+
+### Ky의 장점
+
+- `fetch`의 `Request`·`Response`·`AbortSignal` 모델을 유지합니다.
+- `ky.get().json()`, `json` 옵션, `searchParams`로 Fetch의 반복 코드를 크게 줄입니다.
+- non-2xx 예외, timeout, retry, hooks가 기본 API에 자연스럽게 연결됩니다.
+- Axios보다 작은 추상화와 의존성으로 현대적인 브라우저·Node.js·Bun·Deno 프로젝트에 잘 맞습니다.
+- `.json<T>()`의 기본 타입을 `unknown`으로 두어 무심코 `any`를 퍼뜨리는 일을 줄입니다.
+
+### Ky의 단점
+
+- Axios만큼 오래된 팀별 관례와 대규모 생태계가 있는 것은 아닙니다.
+- Axios의 응답 객체·인터셉터·어댑터에 의존한 기존 코드와는 직접 호환되지 않습니다.
+- Fetch 기반이므로 브라우저 업로드 진행률 등 일부 기능은 런타임·사용 API에 따라 별도 확인이 필요합니다.
+- Ky의 retry와 TanStack Query의 retry를 동시에 켜면 실제 요청 횟수를 예측하기 어렵습니다.
+
+Ky는 **Fetch의 표준성과 Axios에 가까운 편의 기능을 함께 원하지만, Axios 수준의 큰 추상화까지는 필요하지 않은 경우**에 잘 맞습니다.
+
+## Fetch·Axios·Ky 비교표
+
+아래 표는 “기능이 있느냐”만이 아니라, 그 기능을 어느 계층에서 정책으로 소유하는지도 함께 비교한 표입니다.
+
+| 비교 기준 | `fetch` | `axios` | `ky` |
+| --- | --- | --- | --- |
+| 정체 | 웹 표준 전역 API | 독립적인 Promise HTTP 클라이언트 | Fetch 기반의 작은 HTTP 클라이언트 |
+| 설치 | 대부분 런타임에 내장 | `axios` 설치 필요 | `ky` 설치 필요 |
+| 응답 형태 | `Response` 객체 | `AxiosResponse<T>`의 `data`, `status` 등 | `Response` + `.json()` 등 편의 메서드 |
+| 4xx·5xx 기본 동작 | Promise가 reject되지 않음. `ok` 직접 확인 | 기본적으로 reject | 기본적으로 `HTTPError` throw |
+| JSON 요청 | `JSON.stringify`와 헤더 직접 작성 | 요청·응답 변환 기능과 `data` 접근 제공 | `json` 옵션과 `.json()` 제공 |
+| base URL | 직접 래퍼 작성 | `baseURL`, 인스턴스 | `baseUrl`, `ky.create` |
+| 공통 요청 처리 | 래퍼·함수 조합 | request/response interceptor | before/after hooks |
+| 취소 | `AbortController`/`AbortSignal` | `signal` 지원, `CancelToken`은 deprecated | Fetch의 `AbortSignal` 사용 |
+| 타임아웃 | `AbortSignal.timeout` 또는 직접 구현 | `timeout` 옵션 | `timeout` 옵션 |
+| 재시도 | 직접 구현 | 인터셉터·별도 패키지로 정책 구성 | retry 옵션과 backoff·jitter 제공 |
+| 타입 경험 | 응답 타입 검증은 직접 설계 | 제네릭과 `AxiosError` 제공 | `.json<T>()`, Standard Schema 검증 지원 |
+| 스트림·웹 표준 | 가장 직접적 | Axios API와 어댑터 방식 | Fetch 모델 유지 |
+| 가장 큰 장점 | 의존성·표준성·제어권 | 복잡한 HTTP 정책을 한곳에 모으기 쉬움 | Fetch 기반의 간결한 생산성 |
+| 가장 큰 단점 | 반복되는 안전장치·오류 처리 | 추상화·인터셉터 복잡도 | 생태계와 기존 Axios 호환성 |
+| 추천 상황 | 작은 API, 서버 컴포넌트, 표준 중심 | 인증·다중 백엔드·레거시·관찰성 | 현대적인 클라이언트 앱의 간결한 API |
+
+여기서 “Axios가 Fetch보다 무조건 좋다”거나 “Fetch가 라이브러리보다 항상 빠르다”라고 결론 내리면 안 됩니다. 대부분의 일반 JSON API에서 체감 성능을 결정하는 것은 라이브러리 이름보다 요청 수, payload 크기, 캐시 정책, 서버 응답 시간, 렌더링 구조입니다. 세 도구의 선택 기준은 **전송 계층에서 감당해야 할 정책의 복잡도와 팀의 선호**에 더 가깝습니다.
+
+## TanStack Query는 무엇을 대체할까요?
+
+### TanStack Query는 Axios를 대체하는 HTTP 클라이언트가 아닙니다
+
+TanStack Query의 `queryFn`은 Promise를 반환하기만 하면 됩니다. 그 Promise를 `fetch`, `axios`, `ky`, GraphQL client, IndexedDB 함수가 만들 수 있습니다. 따라서 TanStack Query 도입 후에도 다음 코드는 여전히 필요합니다.
+
+```ts
+const query = useQuery({
+  queryKey: ["users", userId],
+  queryFn: () => api.users.get(userId),
+});
+```
+
+여기서 `api.users.get`이 Fetch인지 Axios인지 Ky인지는 Query가 알지 못합니다. Query는 Promise의 결과와 생명주기를 관리할 뿐입니다. [TkDodo: React Query as a State Manager](https://tkdodo.eu/blog/react-query-as-a-state-manager)
+
+### TanStack Query가 실제로 대체하는 것
+
+TanStack Query는 `useEffect`와 `useState`를 조합해 직접 만들던 서버 상태 관리 코드를 대체합니다.
+
+| 직접 만들던 코드 | TanStack Query가 제공하는 것 |
+| --- | --- |
+| `isLoading`, `error`, `data` 상태 | `useQuery`의 상태 모델 |
+| 같은 API를 여러 컴포넌트에서 반복 호출 | `queryKey` 기반 캐시와 동시 요청 deduplication |
+| 화면을 다시 열 때 언제 재호출할지 | `staleTime`, mount·focus·reconnect refetch |
+| 오래된 캐시를 언제 버릴지 | `gcTime`과 inactive query 관리 |
+| POST 성공 후 관련 GET을 직접 다시 호출 | `invalidateQueries`와 background refetch |
+| 페이지네이션·무한 스크롤 상태 | `useInfiniteQuery`, 페이지 단위 query 설계 |
+| 임시 데이터를 먼저 화면에 반영하고 실패 시 복구 | optimistic update와 rollback 패턴 |
+| 요청이 늦어졌을 때 이전 화면과 로딩 상태 조정 | `isFetching`, placeholder, query 상태 모델 |
+| 컴포넌트가 사라졌을 때 요청 취소 연결 | `queryFn`에 전달되는 `AbortSignal` |
+
+TanStack Query 공식 문서는 기본적으로 캐시 데이터를 stale로 간주하고, stale query를 새 인스턴스 마운트·창 포커스·네트워크 재연결 때 백그라운드에서 다시 가져온다고 설명합니다. inactive query는 기본적으로 5분 뒤 garbage collection 대상이 됩니다. 이 동작은 편리하지만 프로젝트의 데이터 신선도에 맞춰 `staleTime`과 `gcTime`을 조정해야 합니다. [Important Defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)
+
+### 무엇과 중복될까요?
+
+TanStack Query와 HTTP 클라이언트가 전혀 겹치지 않는다고만 말하면 실제 설계에서 문제가 생깁니다. 일부 기능은 양쪽에 존재합니다.
+
+| 기능 | HTTP 클라이언트 | TanStack Query | 권장 소유자 |
+| --- | --- | --- | --- |
+| 요청 timeout | Axios·Ky 또는 AbortController | 직접 제공하는 핵심 기능은 아님 | 전송 계층 |
+| 네트워크 재시도 | Ky 기본 retry, Axios 인터셉터 등 | query retry 기본 3회 | 한 곳을 주 소유자로 결정 |
+| 취소 | `AbortSignal` | queryFn에 signal을 전달하고 query 생명주기와 연결 | 둘을 연결 |
+| HTTP 오류 판정 | Fetch는 직접, Axios·Ky는 기본 제공 | queryFn이 throw해야 error 상태가 됨 | HTTP 클라이언트가 표준화 |
+| 캐시·deduplication | 일부 인스턴스 캐시는 가능하지만 주 목적 아님 | queryKey 기반으로 제공 | TanStack Query |
+| token refresh | interceptor·hook·래퍼 | 직접 제공하지 않음 | HTTP 클라이언트 또는 인증 계층 |
+| optimistic update | 직접 구현 | mutation과 cache API 제공 | TanStack Query |
+| 파일 업로드 진행률 | Axios·XHR 계열이 편리 | 직접 제공하지 않음 | 전송 계층 + UI 상태 |
+
+가장 조심해야 할 부분은 **재시도 중복**입니다. TanStack Query의 query는 기본적으로 3회 재시도하고, Ky도 기본 retry가 있으며, Axios 인터셉터도 재시도를 구현할 수 있습니다. 예를 들어 Ky가 한 번의 호출을 최대 3회 실행하고 TanStack Query가 그 실패를 다시 3회 시도하면 네트워크 상황에 따라 최대 9회의 실제 요청이 발생할 수 있습니다. [TanStack Query Query Retries](https://tanstack.com/query/latest/docs/framework/react/guides/query-retries), [Ky retry](https://github.com/sindresorhus/ky#retry)
+
+권장하는 원칙은 다음과 같습니다.
+
+- `timeout`, HTTP 상태 판정, 인증 헤더·토큰 갱신은 전송 계층이 소유합니다.
+- 캐시 재사용, stale 판정, refetch, mutation 이후 무효화는 TanStack Query가 소유합니다.
+- 일시적 네트워크 오류 재시도는 한 계층을 주 소유자로 정하고 다른 계층은 끕니다.
+- 결제·생성·발송 같은 mutation은 기본적으로 재시도하지 않고 idempotency 정책을 먼저 정합니다.
+
+예를 들어 Ky를 전송 계층으로 선택하고 Query가 재시도를 관리한다면 다음처럼 구성할 수 있습니다.
+
+```ts
+import ky, { HTTPError } from "ky";
+import { QueryClient } from "@tanstack/react-query";
+
+export const api = ky.create({
+  timeout: 10_000,
+  retry: { limit: 0 },
+});
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (error instanceof HTTPError && error.response.status < 500) {
+          return false;
+        }
+
+        return failureCount < 2;
+      },
+    },
+  },
+});
+```
+
+반대로 HTTP 클라이언트에서 상태 코드별 재시도와 `Retry-After`를 세밀하게 처리해야 한다면 Query의 `retry`를 `false`로 두고 전송 계층에 위임할 수 있습니다. 어느 쪽이든 팀 문서에 “재시도 횟수·대상 메서드·대상 상태 코드·mutation 중복 방지”를 명시해야 합니다.
+
+## TanStack Query와 HTTP 클라이언트를 어떻게 조합할까요?
+
+### 기본 추천: TanStack Query + Fetch
+
+다음 조건이라면 `fetch`와 TanStack Query 조합을 먼저 선택합니다.
+
+- 브라우저와 Next.js 서버 런타임의 웹 표준 API를 함께 사용합니다.
+- API 인증이 단순하고, 복잡한 토큰 재발급 인터셉터가 없습니다.
+- 의존성을 줄이고 프로젝트의 API 경계를 직접 설계하고 싶습니다.
+- 프레임워크의 서버 `fetch` 캐시·렌더링 모델과 맞물리는 코드가 많습니다.
+
+```ts
+import { queryOptions } from "@tanstack/react-query";
+
+async function getUser(id: number, signal?: AbortSignal): Promise<User> {
+  const response = await fetch(`/api/users/${id}`, { signal });
+
+  if (!response.ok) {
+    throw new ApiError(`사용자 조회 실패: ${response.status}`, response.status);
+  }
+
+  return response.json() as Promise<User>;
+}
+
+export const userQueryOptions = (id: number) =>
+  queryOptions({
+    queryKey: ["users", id],
+    queryFn: ({ signal }) => getUser(id, signal),
+    staleTime: 30_000,
+  });
+```
+
+`queryFn`에서 Query가 넘겨준 `signal`을 Fetch에 전달하면 query가 취소될 때 실제 네트워크 요청도 취소할 수 있습니다. TanStack Query 공식 문서는 query 함수에 `AbortSignal`을 전달하며, 이를 소비하면 Fetch 같은 Promise도 취소할 수 있다고 설명합니다. [Query Cancellation](https://tanstack.com/query/latest/docs/framework/react/guides/query-cancellation)
+
+### 복잡한 인증과 다중 백엔드: TanStack Query + Axios
+
+다음 조건이라면 Axios를 선택할 가치가 커집니다.
+
+- 여러 API 호스트와 API 버전이 존재합니다.
+- 모든 요청에 인증·상관 ID·공통 헤더를 넣어야 합니다.
+- access token 만료 시 refresh token으로 한 번만 갱신하고 대기 중인 요청을 재실행해야 합니다.
+- Node.js와 브라우저에서 공통 API 클라이언트를 공유하고, 기존 Axios 생태계를 활용해야 합니다.
+
+```ts
+import axios from "axios";
+
+const api = axios.create({
+  baseURL: "/api",
+  timeout: 10_000,
+});
+
+export const usersApi = {
+  get: (id: number, signal?: AbortSignal) =>
+    api.get<User>(`/users/${id}`, { signal }).then(({ data }) => data),
+};
+```
+
+이 조합에서 중요한 규칙은 `usersApi.get`이 Axios 응답 객체 전체를 UI로 흘려보내지 않고 도메인 데이터만 반환하게 하는 것입니다. Query는 `User`를 캐시해야 하므로 컴포넌트가 `response.data`나 Axios 타입을 알 필요가 없습니다.
+
+```ts
+export const userQueryOptions = (id: number) =>
+  queryOptions({
+    queryKey: ["users", id],
+    queryFn: ({ signal }) => usersApi.get(id, signal),
+  });
+```
+
+Axios 인터셉터에서 이미 재시도를 한다면 Query의 재시도를 끄거나, 반대로 Query를 재시도 소유자로 정하고 인터셉터는 인증 갱신만 담당하게 분리합니다.
+
+### Fetch 생산성과 표준성을 유지하고 싶다면: TanStack Query + Ky
+
+다음 조건이라면 Ky가 균형 잡힌 선택입니다.
+
+- `fetch`의 `AbortSignal`과 `Response` 모델을 유지하고 싶습니다.
+- 매 요청의 JSON 직렬화와 `response.ok` 검사를 줄이고 싶습니다.
+- base URL, search params, timeout, hooks가 필요합니다.
+- Axios의 응답 객체와 어댑터 모델을 새 프로젝트에 도입하고 싶지는 않습니다.
+
+```ts
+import ky from "ky";
+
+const api = ky.create({
+  baseUrl: "/api",
+  timeout: 10_000,
+  retry: { limit: 0 },
+});
+
+export const usersApi = {
+  get: (id: number, signal?: AbortSignal) =>
+    api.get(`users/${id}`, { signal }).json<User>(),
+};
+```
+
+Ky는 Fetch 기반이므로 Query에서 받은 `signal`을 그대로 전달할 수 있습니다. `.json<User>()`은 개발자가 원하는 반환 타입을 표현하지만, 서버가 실제로 `User` 형태를 지키는지까지 검증하지는 않습니다. 신뢰 경계에서 Zod 같은 스키마 검증을 추가하거나 Ky의 Standard Schema 연동을 검토해야 합니다.
+
+### 서버 컴포넌트에서 서버 전용으로 가져온다면 TanStack Query가 필요 없을 수 있습니다
+
+모든 데이터 요청에 TanStack Query를 넣는 것이 정답은 아닙니다. Next.js Server Component나 다른 성숙한 프레임워크의 서버 데이터 로딩만 사용하고, 클라이언트에서 캐시·재검증·낙관적 업데이트가 필요하지 않다면 서버에서 `fetch`를 직접 호출하는 편이 단순합니다.
+
+TkDodo도 “데이터 fetching이 서버에서만 일어난다면 클라이언트 비동기 상태 관리 도구인 React Query가 필요하지 않을 수 있다”고 설명합니다. [You Might Not Need React Query](https://tkdodo.eu/blog/you-might-not-need-react-query)
+
+```tsx
+// Server Component 예시
+export default async function Page() {
+  const response = await fetch("https://api.example.com/articles", {
+    next: { revalidate: 60 },
+  });
+
+  if (!response.ok) {
+    throw new Error("게시글을 불러오지 못했습니다.");
+  }
+
+  const articles = (await response.json()) as Article[];
+
+  return <ArticleList articles={articles} />;
+}
+```
+
+다만 같은 화면에서 클라이언트 상호작용 후 목록을 다시 가져오거나, 여러 화면이 같은 데이터를 공유하거나, 포커스 복귀·오프라인·낙관적 업데이트가 필요해지면 TanStack Query를 도입할 이유가 생깁니다.
+
+## 상황별 선택 가이드
+
+| 상황 | 전송 계층 | 서버 상태 계층 | 설계 포인트 |
+| --- | --- | --- | --- |
+| 단순한 Next.js 서버 조회 | `fetch` | 사용하지 않거나 프레임워크 기능 | 서버에서 오류·캐시 정책을 명시 |
+| 작은 React SPA, API 몇 개 | `fetch` 또는 `ky` | TanStack Query | Fetch 래퍼나 Ky에 HTTP 오류 표준화 |
+| 인증·토큰 갱신이 복잡한 B2B 앱 | `axios` | TanStack Query | 인터셉터는 인증·공통 헤더 중심, 재시도 소유자 명시 |
+| 파일 업로드 진행률·레거시 XHR 연동 | `axios` 또는 XHR | TanStack Query는 mutation 상태만 | 업로드 진행률을 UI 로컬 상태로 분리 |
+| API가 REST가 아니고 GraphQL 중심 | GraphQL client | TanStack Query 또는 client cache | Query가 항상 필요한지 캐시 전략 비교 |
+| 정적 참조 데이터와 대시보드 | `fetch` 또는 `ky` | TanStack Query | `staleTime`, polling, focus refetch를 도메인별 설정 |
+| 결제·발송·주문 생성 | `fetch`, `axios`, `ky` 중 하나 | `useMutation` | 자동 retry보다 idempotency key와 명시적 재실행 |
+| 서버 렌더링만 필요하고 클라이언트 캐시 없음 | `fetch` | 사용하지 않음 | 도구를 추가하지 않는 것이 설계 |
+
+### 개인적으로 권장하는 기본 조합
+
+새로운 React·Next.js 클라이언트 애플리케이션을 시작한다면 다음 순서로 판단합니다.
+
+1. 서버 렌더링에서 끝나는 데이터라면 `fetch`만 사용합니다.
+2. 클라이언트 캐시와 동기화가 필요하면 TanStack Query를 추가합니다.
+3. `fetch` 래퍼가 너무 커지기 시작하면 Ky를 검토합니다.
+4. 인증·다중 백엔드·기존 조직 표준이 복잡하면 Axios를 선택합니다.
+5. 어떤 조합을 쓰든 Query와 HTTP 클라이언트 사이에 도메인 API 모듈을 둡니다.
+
+이 순서는 “Fetch가 최고라서”가 아니라, 가장 작은 책임에서 시작해 실제 복잡도가 생기는 지점에만 추상화를 추가하기 위한 순서입니다.
+
+## 실무 설계: 네 계층의 경계를 코드로 고정하기
+
+권장하는 폴더 구조는 다음과 같습니다.
+
+```text
+src/
+  lib/
+    http/
+      fetch-client.ts   # timeout, headers, ApiError
+      axios-client.ts   # 필요한 경우에만
+      ky-client.ts      # 필요한 경우에만
+  features/
+    users/
+      users.api.ts      # 엔드포인트와 DTO 변환
+      users.queries.ts  # queryOptions, mutationOptions
+      UserList.tsx      # 화면과 UI 상태
+```
+
+각 파일의 책임은 다음처럼 좁게 유지합니다.
+
+- `http/*`: HTTP 상태·취소·타임아웃·인증 헤더를 다룹니다.
+- `*.api.ts`: `/users/:id` 같은 엔드포인트와 서버 DTO를 도메인 객체로 변환합니다.
+- `*.queries.ts`: `queryKey`, `queryFn`, `staleTime`, invalidation을 선언합니다.
+- 컴포넌트: 로딩·오류·데이터 표시와 사용자의 로컬 상호작용을 다룹니다.
+
+### Query Key는 서버 상태의 주소입니다
+
+같은 데이터를 공유하려면 Query Key가 실제 데이터 범위를 표현해야 합니다.
+
+```ts
+const userKeys = {
+  all: ["users"] as const,
+  detail: (id: number) => ["users", "detail", id] as const,
+};
+
+export const userQueryOptions = (id: number) =>
+  queryOptions({
+    queryKey: userKeys.detail(id),
+    queryFn: ({ signal }) => usersApi.get(id, signal),
+  });
+```
+
+TanStack Query의 `queryKey`는 캐시 식별자이므로 URL 문자열과 일대일로 같을 필요는 없지만, 필터·페이지·사용자 범위를 빠뜨리면 서로 다른 데이터를 같은 캐시에 저장할 수 있습니다. `queryOptions`는 query key와 query function을 한곳에 모아 `useQuery`, prefetch, `fetchQuery`에서 함께 재사용할 수 있는 공식 패턴입니다. [TanStack Query queryOptions](https://tanstack.com/query/latest/docs/framework/react/guides/query-options)
+
+### Mutation 성공 후에는 관련 Query를 무효화합니다
+
+```ts
+const queryClient = useQueryClient();
+
+const createUserMutation = useMutation({
+  mutationFn: usersApi.create,
+  onSuccess: async () => {
+    await queryClient.invalidateQueries({
+      queryKey: userKeys.all,
+    });
+  },
+});
+```
+
+`invalidateQueries`는 해당 query를 stale로 표시하고, 현재 화면에서 사용 중이면 백그라운드 refetch를 시작합니다. Axios나 Ky가 이 책임까지 맡는 것이 아니라, 서버 상태 계층인 QueryClient가 맡는 이유입니다. [TanStack Query Query Invalidation](https://tanstack.com/query/latest/docs/framework/react/guides/query-invalidation)
+
+## 자주 생기는 설계 오류
+
+### 1. Axios 응답 객체를 Query 캐시에 그대로 저장하기
+
+```ts
+// 피하는 편이 좋은 형태
+queryFn: () => axios.get<User>("/users/1")
+```
+
+이렇게 하면 캐시에 `User`가 아니라 Axios의 `response` 객체가 저장됩니다. UI와 도메인 로직이 Axios를 알아야 하고, HTTP 클라이언트를 Ky로 교체할 때 영향 범위가 커집니다.
+
+```ts
+// 도메인 데이터만 반환
+queryFn: () => axios.get<User>("/users/1").then(({ data }) => data)
+```
+
+### 2. Fetch에서 HTTP 오류 검사를 빼먹기
+
+```ts
+// 404 JSON을 성공 데이터로 캐시할 수 있음
+queryFn: () => fetch("/users/1").then((response) => response.json())
+```
+
+Fetch는 404에서도 resolve하므로 반드시 오류를 throw하는 래퍼를 사용해야 합니다. Query는 `queryFn`이 throw한 Promise를 실패 상태로 처리합니다.
+
+### 3. 재시도를 세 군데에 동시에 설정하기
+
+HTTP 클라이언트, QueryClient, mutation 코드가 각각 재시도하면 장애가 커지고 실제 요청 수를 파악하기 어렵습니다. 재시도 정책은 “네트워크 오류”와 “서버 상태 동기화” 중 어느 층이 주도할지 정한 뒤 하나의 기본값으로 통일합니다.
+
+### 4. 서버 상태를 전역 로컬 상태에 복사하기
+
+Query의 `data`를 다시 Zustand나 Redux에 복사하면 두 개의 진실 공급원이 생깁니다. 서버에서 다시 가져온 최신 데이터와 로컬 복사본의 동기화 규칙이 필요해지기 때문입니다. 편집 중인 폼 값처럼 사용자가 소유하는 임시 상태만 로컬 상태로 분리하고, 서버의 정식 데이터는 Query 캐시에 남기는 편이 보통 단순합니다.
+
+### 5. 모든 요청을 자동 재시도하기
+
+조회는 재시도해도 안전한 경우가 많지만, 생성·결제·발송은 같은 요청을 두 번 실행해도 되는지 먼저 확인해야 합니다. 재시도보다 idempotency key, 서버의 중복 제거, 사용자 확인 흐름이 먼저입니다.
+
+## 최종 정리
+
+`fetch`·`axios`·`ky`는 모두 HTTP 전송을 담당하지만, 선택 이유가 다릅니다.
+
+- `fetch`는 표준성과 제어권이 가장 중요할 때 선택합니다.
+- `axios`는 인증·다중 API·레거시·공통 정책이 복잡할 때 선택합니다.
+- `ky`는 Fetch의 표준 모델을 유지하면서 JSON·오류·재시도·타임아웃을 간결하게 쓰고 싶을 때 선택합니다.
+
+TanStack Query는 이들을 대체하지 않습니다. 대신 `useEffect`와 로컬 상태로 직접 만들던 서버 상태 캐시·동기화·무효화·재검증 흐름을 대체합니다.
+
+따라서 일반적인 React 클라이언트 앱의 기본 조합은 다음처럼 결정할 수 있습니다.
+
+```text
+서버 조회만 필요함
+  → fetch
+
+클라이언트 캐시·동기화가 필요함
+  → TanStack Query + fetch
+
+Fetch 편의 API가 필요함
+  → TanStack Query + Ky
+
+인증·다중 백엔드·레거시 HTTP 정책이 복잡함
+  → TanStack Query + Axios
+```
+
+가장 좋은 조합은 라이브러리를 많이 추가한 조합이 아니라, **HTTP 요청 정책과 서버 상태 정책이 서로의 책임을 침범하지 않는 조합**입니다. 먼저 전송 계층을 얇게 만들고, 캐시와 동기화가 실제 문제로 나타날 때 TanStack Query를 추가하면 팀이 이해해야 할 흐름과 운영 리스크를 함께 줄일 수 있습니다.
+
+## FAQ
+
+### TanStack Query를 쓰면 Axios를 삭제해야 하나요?
+
+아닙니다. TanStack Query는 Promise를 반환하는 `queryFn`을 필요로 하며, 그 Promise를 Axios가 만들 수 있습니다. Axios는 HTTP 요청·인증·오류·취소를 담당하고, TanStack Query는 캐시·동기화·무효화를 담당하도록 나누면 됩니다.
+
+### Fetch와 Ky 중 무엇을 선택해야 하나요?
+
+Fetch의 표준 API를 그대로 사용하고 래퍼를 직접 통제하고 싶다면 Fetch를 선택합니다. JSON 요청, non-2xx 예외, timeout, retry, hooks를 반복해서 만들고 싶지 않다면 Ky가 편합니다. 둘의 성능 차이보다 팀이 전송 정책을 어디에 두고 싶은지가 더 중요합니다.
+
+### Axios와 Ky를 동시에 써도 되나요?
+
+가능하지만 보통은 API 영역이나 런타임 경계를 명확히 해야 합니다. 일부 파일은 Axios, 일부 파일은 Ky를 쓰면서 오류 타입·재시도·인증 방식이 달라지면 유지보수 비용이 커집니다. 마이그레이션 기간이 아니라면 기본 클라이언트를 하나 정하고 예외를 문서화하는 편이 좋습니다.
+
+### TanStack Query의 `retry`와 Ky의 `retry`를 모두 켜도 되나요?
+
+특별한 이유가 없다면 피하는 편이 좋습니다. 두 계층의 재시도가 곱해져 실제 요청 수와 지연 시간이 예상보다 커질 수 있습니다. 기본적으로 한 계층만 재시도의 주 소유자로 정하고, 다른 계층은 `retry: false` 또는 `limit: 0`으로 명시합니다.
+
+### Fetch는 404에서 왜 `catch`로 가지 않나요?
+
+Fetch는 네트워크 요청 자체가 완료되면 HTTP 상태가 404여도 `Response`를 resolve합니다. 따라서 `response.ok`가 false인지 확인하고 직접 예외를 던져야 Query나 호출자의 오류 흐름이 시작됩니다.
+
+### Server Component에서도 TanStack Query를 사용해야 하나요?
+
+서버에서만 데이터를 가져오고 클라이언트 캐시·재검증·낙관적 업데이트가 필요하지 않다면 사용하지 않아도 됩니다. Server Component의 `fetch`나 프레임워크 데이터 로딩으로 충분할 수 있습니다. 클라이언트 상호작용과 여러 화면의 서버 상태 공유가 필요해지는 순간 도입을 검토합니다.
+
+## 참고 자료
+
+- [MDN: Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
+- [MDN: Using the Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch)
+- [MDN: XMLHttpRequest](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest)
+- [Axios: First steps](https://axios-http.com/docs/intro)
+- [Axios: Response schema](https://axios.rest/pages/advanced/response-schema)
+- [Axios: Interceptors](https://axios-http.com/docs/interceptors)
+- [Axios: Cancellation](https://axios.rest/pages/advanced/cancellation)
+- [Axios: Retry and error recovery](https://axios.rest/pages/advanced/retry)
+- [Ky 공식 저장소와 README](https://github.com/sindresorhus/ky)
+- [TanStack Query: Overview](https://tanstack.com/query/latest/docs/framework/react/overview)
+- [TanStack Query: Important Defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)
+- [TanStack Query: Query Cancellation](https://tanstack.com/query/latest/docs/framework/react/guides/query-cancellation)
+- [TanStack Query: Query Retries](https://tanstack.com/query/latest/docs/framework/react/guides/query-retries)
+- [TanStack Query: Query Invalidation](https://tanstack.com/query/latest/docs/framework/react/guides/query-invalidation)
+- [TkDodo: React Query as a State Manager](https://tkdodo.eu/blog/react-query-as-a-state-manager)
+- [TkDodo: You Might Not Need React Query](https://tkdodo.eu/blog/you-might-not-need-react-query)

@@ -20,6 +20,10 @@ function getAllUrls() {
 
     const files = fs.readdirSync(fullDirPath).filter(f => f.endsWith(".mdx") || f.endsWith(".md"));
     for (const file of files) {
+      const filePath = path.join(fullDirPath, file);
+      const { data } = matter(fs.readFileSync(filePath, "utf8"));
+      if (data.published === false) continue;
+
       const slug = file.replace(/\.mdx?$/, "");
       const type = dir.includes("blog") ? "blog" : "projects";
       urls.push(`${SITE_URL}/${type}/${slug}`);

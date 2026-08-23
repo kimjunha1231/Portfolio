@@ -1,355 +1,357 @@
 ---
-title: "dnd-kit의 고질적인 문제 리렌더링 최적화"
+title: "칸반보드 리렌더링 최적화: dnd-kit에서 @hello-pangea/dnd로 전환한 이유"
 date: "2026-07-26"
-lastModified: "2026-07-26"
-section: "기술 노트"
+lastModified: "2026-08-12"
+published: true
+section: "개발 기록"
 category: "React / Performance"
-tags: ["React", "dnd-kit", "Render Props", "React.memo", "React Portal", "Performance"]
+tags: ["React", "Rendering", "Performance", "React.memo", "Context", "dnd-kit", "hello-pangea/dnd", "Render Props", "React Portal"]
 cover: "/images/blog/dnd-kit-rendering-boundaries.png"
-coverAlt: "dnd-kit의 Context 전파, 렌더링 경계 분리, Portal 이동을 세 패널로 표현한 기술 도식"
+coverAlt: "칸반보드의 드래그 상태와 카드 콘텐츠를 서로 다른 렌더링 경계로 나눈 구조도"
 coverFit: "contain"
-description: "JobSecretary 칸반 보드에서 dnd-kit 드래그 중 발생한 불필요한 리렌더링을 React Context, useSortable 소스, Render Props, React.memo, DragOverlay와 Portal의 관점에서 분석하고 최적화한 과정을 정리합니다."
+description: "React dnd-kit 기반 JobSecretary 칸반보드에서 카드 하나를 드래그할 때 영향을 받지 않은 카드까지 리렌더링되던 원인을 분석했습니다. Context 구독 범위와 컴포넌트 경계를 조정하고 @hello-pangea/dnd로 전환한 뒤 리렌더링 범위의 변화를 비교합니다."
 ---
 
-JobSecretary 칸반 보드에서 카드 하나를 드래그했을 뿐인데 이동하지 않은 카드까지 함께 렌더링되는 현상을 발견했습니다. React Developer Tools Profiler로 같은 드래그 시나리오를 비교한 결과, 기록된 전체 커밋은 **271회에서 98회로**, 비활성 카드의 렌더링은 **268회에서 0회로** 줄었습니다.
+JobSecretary 프로젝트의 칸반보드에서 카드 하나를 드래그할 때마다 모든 카드가 리렌더링되던 원인을 분석하고, 컴포넌트 구조와 DnD 라이브러리를 변경한 과정이다.
 
-결론부터 말하면 이 문제의 본질은 “`dnd-kit`은 원래 느리다”가 아닙니다. `useSortable`이 정렬 상태를 읽는 컴포넌트와 회사명·직무·마감일을 그리는 컴포넌트가 같은 렌더링 경계에 있었던 것이 핵심이었습니다. `@hello-pangea/dnd`로 교체하면서 Render Props API가 이 경계를 드러내기 쉬워졌지만, 같은 경계 분리는 `dnd-kit`에서도 구현할 수 있습니다.
+## 문제를 발견한 순간
 
-이 글에서 말하는 “고질적인 문제”는 모든 프로젝트에서 반드시 발생하는 라이브러리 버그가 아니라, 다음 조건이 겹칠 때 반복적으로 나타나는 구조적 문제를 뜻합니다.
+칸반보드에서 카드를 드래그하는 동안 렌더링이 반복되는 것을 확인했다. 처음에는 드래그 중인 카드와 위치가 바뀌는 인접 카드만 다시 실행될 것으로 예상했지만, React Developer Tools로 확인해보니 보드 안의 영향을 받지 않은 카드도 반복해서 렌더링되고 있었다.
 
-1. 여러 아이템이 하나의 `SortableContext`를 구독합니다.
-2. 드래그 중 `activeIndex`, `overIndex`, `transform`처럼 자주 변하는 값이 바뀝니다.
-3. 드래그 연결 로직과 무거운 카드 UI가 같은 컴포넌트에 있습니다.
-4. `React.memo`를 적용했지만 컴포넌트가 Context를 직접 읽거나, 매번 새 객체·함수를 Props로 받습니다.
+## 개선 결과
 
-<figure className="not-prose">
-  <ZoomableImage
-    src="/images/blog/dnd-kit-rendering-boundaries.png"
-    alt="왼쪽은 SortableContext의 변화가 여러 카드로 전파되는 구조, 가운데는 드래그 셸과 카드 콘텐츠가 분리된 구조, 오른쪽은 Portal로 스크롤 컨테이너 밖에 드래그 카드를 표시하는 구조"
-    loading="lazy"
-    decoding="async"
-    className="h-auto w-full rounded-2xl border border-card-border bg-foreground/5"
-  />
-  <figcaption>생성 이미지의 도형은 개념을 설명하기 위한 보조 자료이며, 실제 수치와 API 이름은 본문의 코드와 출처를 기준으로 확인해야 합니다.</figcaption>
-</figure>
-
-## 문제를 어떻게 측정했는가
-
-이번 글의 수치는 JobSecretary에서 동일한 카드를 같은 위치로 드래그하는 시나리오를 React Developer Tools Profiler로 기록한 결과입니다. 절대적인 `dnd-kit` 벤치마크가 아니라, 같은 프로젝트에서 구조를 바꾼 전후를 비교한 값입니다.
+개선 전과 후의 결과는 다음과 같았다.
 
 | 항목 | 변경 전 | 변경 후 | 변화 |
 | --- | ---: | ---: | ---: |
-| 한 번의 드래그에서 기록된 전체 커밋 | 271회 | 98회 | 63.8% 감소 |
-| 실제 변경이 없던 카드 렌더링 | 268회 | 0회 | 100% 감소 |
+| 한 번의 드래그에서 발생한 Profiler 전체 커밋 | 271회 | 98회 | **63.8% 감소** |
+| 영향을 받지 않은 카드에 표시된 렌더링 횟수 | 약 268~269회 | 0회 | 반복 실행 제거 |
 
-이 측정은 브라우저, React 실행 모드, 카드 수, 센서 설정에 따라 달라질 수 있습니다. 특히 개발 모드의 Strict Mode나 Profiler 자체의 측정 비용이 결과에 영향을 줄 수 있으므로, 이 숫자를 라이브러리 간 일반적인 성능 순위로 해석하지 않았습니다.
+개선 전 영상에서는 드래그 중인 카드 이외의 영향을 받지 않은 카드에도 268~269회의 렌더링이 표시되고, Profiler에는 총 271번의 커밋이 기록되어 있다.
 
-## dnd-kit의 Sortable 구조는 무엇을 구독하는가
+<blockquote>
+  측정 시나리오: 로컬 개발 환경에서 같은 칸반 카드 목록의 카드를 드래그해 다른 위치에 놓는 과정. Profiler의 전체 커밋 수와 React Developer Tools가 각 컴포넌트에 표시한 렌더링 횟수를 구분해 기록했다.
+</blockquote>
 
-`dnd-kit`의 sortable preset은 `SortableContext`가 정렬 정보를 제공하고, 각 아이템의 `useSortable`이 그 정보를 읽는 구조입니다. 공식 문서도 `useSortable`을 `useDraggable`과 `useDroppable`을 조합한 Hook으로 설명하며, Hook은 상위 `SortableContext`의 하위 컴포넌트에서 사용해야 한다고 명시합니다. [Sortable 공식 문서](https://docs.dndkit.com/presets/sortable)
+이 수치는 당시의 개선 전과 최종 개선 후 구현을 비교한 결과다. 두 구현 사이에는 DnD 라이브러리뿐 아니라 React 버전, React Compiler 적용 여부, 컴포넌트 경계도 함께 달라졌기 때문에 특정 라이브러리 하나의 성능만 비교한 측정값으로 볼 수는 없다. 이후 같은 데이터와 실행 환경에서 `dnd-kit`을 유지한 실험을 다시 진행해 각 변경의 역할을 나누어 확인했다.
 
-구조를 단순화하면 다음과 같습니다.
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
+  <VideoLink slug="jobsecretary-before" caption="개선 전 · 카드 드래그 동작" inline />
+  <VideoLink slug="jobsecretary-after" caption="개선 후 · 카드 드래그 동작" inline />
+</div>
 
-```text
-DndContext (드래그 센서·충돌 검출·글로벌 드래그 상태 관리)
-  │
-  └── SortableContext (items 목록·strategy·정렬 좌표 Context 전파)
-        │
-        ├── SortableCard A (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
-        ├── SortableCard B (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
-        └── SortableCard C (useSortable 구독) ── 카드 UI (회사명·직무·마감일)
-```
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
+  <figure className="min-w-0">
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/blog/kanban-profiler-before.png"
+        alt="React Developer Tools Profiler 개선 전 측정 커밋 (271회)"
+        className="w-full object-contain"
+      />
+    </div>
+    <figcaption className="mt-2 text-xs text-foreground/60">개선 전 · Profiler 커밋 기록 (271회)</figcaption>
+  </figure>
 
-`SortableContext`의 역할은 단순히 아이디 배열을 보관하는 것이 아닙니다. 정렬 전략이 계산할 수 있도록 `items`, `activeIndex`, `overIndex`, 측정된 사각형(`sortedRects`), `useDragOverlay` 등의 값을 Context로 묶어 하위 아이템에 전달합니다. 공식 저장소의 `SortableContext.tsx`는 `useDndContext()`에서 `active`, `over`, `droppableRects`를 읽고, 이를 바탕으로 Context value를 `useMemo`로 생성합니다. [SortableContext.tsx 소스](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/components/SortableContext.tsx)
+  <figure className="min-w-0">
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/blog/kanban-profiler-after.png"
+        alt="React Developer Tools Profiler 개선 후 측정 커밋 (98회)"
+        className="w-full object-contain"
+      />
+    </div>
+    <figcaption className="mt-2 text-xs text-foreground/60">개선 후 · Profiler 커밋 기록 (98회)</figcaption>
+  </figure>
+</div>
 
-```tsx
-// dnd-kit 저장소의 핵심 흐름을 단순화한 형태입니다.
-const {
-  active,
-  over,
-  droppableRects,
-  measureDroppableContainers,
-} = useDndContext();
+## 첫 번째 가설: `React.memo`로 메모이제이션하면 해결될까?
 
-const activeIndex = active ? items.indexOf(active.id) : -1;
-const overIndex = over ? items.indexOf(over.id) : -1;
+문제를 확인한 뒤 `React.memo`를 시도했다. 드래그 중인 카드 이외의 카드 데이터는 바뀌지 않았기 때문에, 상위 컴포넌트의 렌더링이 영향을 주고 있다면 카드 컴포넌트를 메모이제이션하는 것만으로 막을 수 있다고 생각했다.
 
-const contextValue = useMemo(
-  () => ({
-    activeIndex,
-    overIndex,
-    items,
-    sortedRects: getSortedRects(items, droppableRects),
-    strategy,
-  }),
-  [activeIndex, overIndex, items, droppableRects, strategy],
-);
+기존 `KanbanCard`를 `React.memo`로 감싸고 다시 확인했지만, 기대와 달리 영향을 받지 않은 카드의 반복 실행은 사라지지 않았다.
 
-return (
-  <Context.Provider value={contextValue}>
-    {children}
-  </Context.Provider>
-);
-```
 
-그리고 `useSortable`은 이 Context를 직접 읽습니다. 현재 저장소의 Hook을 보면 첫 단계에서 `useContext(Context)`로 `items`, `activeIndex`, `overIndex`, `sortedRects`, `strategy`를 꺼내고, 이어서 `useDroppable`과 `useDraggable`을 호출합니다. 마지막에는 정렬 전략으로 계산한 `transform`과 `transition`을 반환합니다. [useSortable.ts 소스](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/hooks/useSortable.ts)
+## 비슷한 사례와 원인 찾기
 
-```tsx
-// useSortable.ts의 중요한 부분을 개념적으로 줄인 코드입니다.
-const {
-  items,
-  activeIndex,
-  overIndex,
-  sortedRects,
-  strategy,
-} = useContext(Context);
+메모이제이션만으로 리렌더링이 해결되지 않자 같은 문제를 겪은 사례가 있는지 찾아보았다. Reddit을 비롯한 여러 글에서 `dnd-kit` 적용 후 비활성 아이템까지 반복해서 렌더링된다는 질문과, 메모이제이션으로 이를 줄이려는 시도를 확인할 수 있었다.
 
-const { transform, listeners, attributes, setNodeRef } = useDraggable({
-  id,
-  data,
-});
+이 사례들만으로 라이브러리 자체에 문제가 있다고 결론 내릴 수는 없었지만, `dnd-kit` 로직상 메모이제이션이 적용되지 않고 리렌더링에 영향을 주는 요소가 있을 것이라고 생각했다.
 
-const finalTransform = shouldDisplace
-  ? strategy({
-      rects: sortedRects,
-      activeNodeRect,
-      activeIndex,
-      overIndex,
-      index,
-    })
-  : null;
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
+  <figure className="min-w-0">
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/blog/reddit-dnd-kit-re-render-issue.png"
+        alt="Reddit dnd-kit 리렌더링 최적화 질문글"
+        className="w-full object-contain"
+      />
+    </div>
+    <figcaption className="mt-2 text-xs text-foreground/60">Reddit 질문 · dnd-kit 사용 시 리렌더링 최적화</figcaption>
+  </figure>
 
-return {
-  items,
-  listeners,
-  attributes,
-  setNodeRef,
-  transform: derivedTransform ?? finalTransform,
-};
-```
+  <figure className="min-w-0">
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/blog/reddit-dnd-kit-performance-comment.png"
+        alt="Reddit dnd-kit 불필요한 리렌더링 관련 커뮤니티 의견"
+        className="w-full object-contain"
+      />
+    </div>
+    <figcaption className="mt-2 text-xs text-foreground/60">Reddit 댓글 · dnd-kit의 불필요한 리렌더링 구조에 대한 의견</figcaption>
+  </figure>
+</div>
 
-여기서 중요한 사실은 `useMemo`가 Context 구독을 선택적으로 만들어 주지 않는다는 점입니다. `useMemo`는 Provider가 만드는 value를 재사용할 뿐이고, 의존성 중 하나가 바뀌어 새 value가 만들어지면 해당 Context를 읽는 소비자는 업데이트 대상이 됩니다. 이것은 “모든 카드의 DOM이 매 프레임 다시 그려진다”는 뜻과는 다릅니다. React가 컴포넌트 함수를 다시 호출하는 것과 실제 DOM 변경, 브라우저 페인트는 서로 다른 단계이기 때문입니다. 다만 카드 하나의 좌표 계산을 위해 카드 전체 함수가 다시 호출되면, 그 안의 비싼 UI 계산·자식 생성·Hook 실행이 함께 비용을 낼 수 있습니다.
+## 실제 코드에서 구독 경로 확인하기
 
-## 왜 드래그 중 Context 변경이 넓게 퍼지는가
-
-포인터가 움직일 때 센서는 현재 위치를 갱신하고, `DndContext`는 활성 아이템과 충돌 대상을 다시 계산합니다. `SortableContext`는 그 결과를 `activeIndex`, `overIndex`, `sortedRects` 같은 값으로 변환합니다. 이 값은 정렬 가능한 모든 아이템이 참고할 수 있어야 하므로, 각 `useSortable` 소비자에게 전달됩니다.
-
-```text
-[1] Pointer Sensor (pointermove 이벤트 발생)
-      ↓
-[2] DndContext (active · over · 드래그 측정값 계산)
-      ↓
-[3] SortableContext (새로운 Context value 생성 후 하위 전파)
-      ↓
-[4] useSortable 카드들 (Context 구독으로 인해 transform · transition 재계산)
-      ↓
-[5] 카드 UI 콘텐츠 (동일 컴포넌트에 위치한 무거운 카드 UI도 함께 재실행)
-```
-
-이 설계는 기능적으로 자연스럽습니다. 다른 카드도 현재 위치에 따라 이동해야 하므로 정렬 계산에 참여해야 합니다. 문제는 정렬 계산과 카드 콘텐츠의 책임을 하나의 컴포넌트에 같이 넣었을 때 생깁니다.
+초기 구현의 `KanbanCard`는 `useSortable` 호출과 공고 정보를 렌더링하는 작업을 한 컴포넌트에서 처리하고 있었다. 문제를 확인한 직후에는 이 구조를 그대로 둔 채 `React.memo`로 감싸 먼저 확인했다.
 
 ```tsx
-function SortableCard({ application }: { application: Application }) {
+const KanbanCard = memo(function KanbanCard({
+  application,
+  onDelete,
+}: Props) {
   const {
     attributes,
     listeners,
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ id: application.id });
+  } = useSortable({id: application.id});
 
-  // ⚠️ transform이 바뀌지 않은 카드라도 Context 변경으로 인해 이 컴포넌트 전체가 다시 실행됩니다.
   return (
     <article
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      style={{transform: CSS.Transform.toString(transform), transition}}
       {...attributes}
       {...listeners}
     >
-      <CompanyLogo src={application.logo} />
       <h3>{application.company}</h3>
       <p>{application.role}</p>
-      <Deadline value={application.deadline} />
-      <DeleteButton id={application.id} />
+      <span>{application.deadline}</span>
+      <button onClick={() => onDelete(application.id)}>삭제</button>
     </article>
+  );
+});
+```
+
+여기서 `application`은 카드가 가지고 있는 채용 공고 정보다. 이 실험은 문제를 인지한 뒤 기존 카드 컴포넌트에 `React.memo`를 추가해 확인한 첫 번째 시도였다.
+
+`React.memo`를 적용해도 리렌더링이 줄지 않았기 때문에, 모든 카드에서 호출하고 있던 `useSortable`의 내부 동작을 확인하기로 했다.
+
+프로젝트에서는 `dnd-kit` 라이브러리를 사용했다. [`dnd-kit` Sortable 공식 문서](https://dndkit.com/legacy/presets/sortable/use-sortable/)에서도 상위 `SortableContext`에 아이템 목록을 전달하고, 각 카드에서 `useSortable`을 호출하는 구조를 안내하고 있었다.
+
+```tsx
+import {DndContext} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import {CSS} from "@dnd-kit/utilities";
+
+function SortableItem({id}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({id});
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      Item {id}
+    </li>
+  );
+}
+
+function SortableList({items}) {
+  return (
+    <DndContext>
+      <SortableContext items={items} strategy={verticalListSortingStrategy}>
+        <ul>
+          {items.map((id) => <SortableItem key={id} id={id} />)}
+        </ul>
+      </SortableContext>
+    </DndContext>
   );
 }
 ```
 
-이 컴포넌트는 두 가지 일을 동시에 합니다.
+## 라이브러리 내부 코드 분석
 
-| 책임 | 드래그에 필요한가 | 자주 변하는가 |
-| --- | --- | --- |
-| `setNodeRef`, `listeners`, `attributes` 연결 | 예 | 드래그 중 변할 수 있음 |
-| `transform`, `transition` 스타일 계산 | 예 | 위치가 바뀔 때 변함 |
-| 회사 로고, 회사명, 직무 렌더링 | 아니오 | 데이터가 바뀔 때만 변하면 충분 |
-| 삭제 버튼, 상세 페이지 이동 핸들러 | 아니오 | 함수 참조가 안정적이면 충분 |
+정렬 기능의 데이터 전파 구조를 단순화하면 다음과 같다.
 
-즉, 모든 카드가 정렬 계산을 구독해야 한다는 사실과 모든 카드 콘텐츠가 매번 다시 계산되어야 한다는 결론은 같지 않습니다. 이 둘을 분리하는 것이 이번 최적화의 핵심입니다.
-
-## React.memo를 먼저 적용했는데 왜 충분하지 않았는가
-
-`React.memo`는 부모가 전달한 Props를 비교해 Props가 같으면 컴포넌트의 재렌더링을 건너뛸 수 있게 합니다. React 공식 문서도 `memo`를 성능 최적화 수단으로 설명하며, Props가 객체·함수일 때 참조가 매번 바뀌지 않도록 설계해야 효과를 얻는다고 안내합니다. [React.memo 공식 문서](https://react.dev/reference/react/memo)
-
-하지만 `memo`로 감싼 컴포넌트가 Context를 직접 읽으면 이야기가 달라집니다.
-
-```tsx
-// ❌ 문제 구조: React.memo로 감싸도 내부에서 Context를 직접 구독하면 재렌더링을 막을 수 없습니다.
-const SortableCard = memo(function SortableCard({ application }: Props) {
-  // useSortable Hook이 상위 SortableContext의 변경을 직접 읽음
-  const sortable = useSortable({ id: application.id });
-
-  // application Props가 동일해도 Context가 변하면 이 컴포넌트는 다시 실행됩니다.
-  return <CardView application={application} sortable={sortable} />;
-});
+```text
+DndContext - active·over·요소 위치와 드래그 이벤트를 관리한다.
+  └─ SortableContext - 정렬에 필요한 인덱스와 위치 정보를 계산한다.
+       ├─ 카드 A ─ useSortable() ─ 회사명·직무·마감일
+       ├─ 카드 B ─ useSortable() ─ 회사명·직무·마감일
+       └─ 카드 C ─ useSortable() ─ 회사명·직무·마감일
 ```
 
-`memo`는 Context 소비자를 Context 변경으로부터 격리하는 장치가 아닙니다. 그래서 다음과 같은 구조가 더 효과적입니다.
+### 1. `SortableContext.tsx` 분석
+
+`SortableContext`는 상위의 `DndContext`에서 드래그 상태를 읽고, 이를 정렬에 필요한 인덱스와 요소 위치로 바꿔 하위 카드에 제공한다. 아래 코드는 프로젝트에서 사용한 `@dnd-kit/sortable 10.0.0`의 내부 `SortableContext.tsx` 중 이번 문제와 관련된 흐름만 단순화한 것이다.
 
 ```tsx
-// ✅ 개선 구조: 드래그 상태를 아는 외곽 셸과 순수 UI 콘텐츠를 분리
+export function SortableContext({children, items, strategy}: Props) {
+  const {active, droppableRects, over} = useDndContext();
+  const activeIndex = active ? items.indexOf(active.id) : -1;
+  const overIndex = over ? items.indexOf(over.id) : -1;
 
-// 1. 순수 카드 UI 콘텐츠 (Context에 의존하지 않는 메모이제이션된 컴포넌트)
-const CardContent = memo(function CardContent({
-  company,
-  role,
-  deadline,
-  onDelete,
-}: CardContentProps) {
-  return (
-    <>
-      <h3>{company}</h3>
-      <p>{role}</p>
-      <Deadline value={deadline} />
-      <DeleteButton onClick={onDelete} />
-    </>
+  const contextValue = useMemo(
+    () => ({
+      activeIndex,
+      items,
+      overIndex,
+      sortedRects: getSortedRects(items, droppableRects),
+      strategy,
+    }),
+    [
+      activeIndex,
+      items,
+      overIndex,
+      droppableRects,
+      strategy,
+    ]
   );
-});
 
-// 2. 외곽 드래그 셸 (useSortable Context 구독 및 포지션 스타일 계산 전담)
-function SortableCardShell({ application, onDelete }: Props) {
-  const { setNodeRef, listeners, attributes, transform, transition } =
-    useSortable({ id: application.id });
+  return <Context.Provider value={contextValue}>{children}</Context.Provider>;
+}
+```
+
+드래그 중인 카드의 좌표가 바뀐다고 해서 이 Context 값이 매번 바뀌는 것은 아니다. 하지만 드롭 대상이나 정렬 인덱스, 측정된 요소 위치가 바뀌어 새로운 `contextValue`가 만들어지면, 이를 구독하는 컴포넌트의 리렌더링에 영향을 줄 수 있다고 생각했다.
+
+다만 `SortableContext`의 변경만으로 보드 전체 카드의 반복 실행을 모두 설명하기는 어렵다고 생각해, 하위에서 호출하는 `useSortable` Hook도 함께 확인해보았다.
+
+---
+
+### 2. `useSortable.ts` 분석
+
+`useSortable`은 `SortableContext`를 읽는 데서 끝나지 않는다. 내부적으로 `useDroppable`과 `useDraggable`을 조합하기 때문에 각 카드는 정렬 인덱스뿐 아니라 `DndContext`가 관리하는 활성 카드와 드롭 대상 상태도 구독한다.
+
+```tsx
+export function useSortable({id}: Arguments) {
+  const {
+    items,
+    containerId,
+    activeIndex,
+    sortedRects,
+    overIndex,
+  } = useContext(Context);
+
+  const index = items.indexOf(id);
+  const data = {sortable: {containerId, index, items}};
+  const droppable = useDroppable({id, data});
+  const draggable = useDraggable({id, data});
+
+  // 정렬 위치와 draggable·droppable 값을 조합해 반환한다.
+}
+```
+
+이 코드는 실제로 사용한 `@dnd-kit/sortable 10.0.0`의 [`useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)에서 구독 구조만 단순화한 것이다.
+
+프로젝트에서 각 카드를 렌더링하던 `KanbanCard`는 내부의 `useSortable`을 통해 여러 드래그 상태를 직접 구독하고 있었다. `React.memo`는 부모로부터 전달받은 Props가 바뀌지 않았을 때 컴포넌트의 실행을 건너뛰지만, 컴포넌트 내부에서 `useContext`로 구독하는 값의 변경까지 막아주지는 않는다. 따라서 상위 `DndContext`나 `SortableContext`가 제공하는 값이 바뀌면, 이를 구독하는 `KanbanCard`는 Props가 그대로여도 다시 실행된다. 기존 구조에서는 모든 카드가 `useSortable`을 사용하고 있었기 때문에, 드롭 대상이나 정렬 인덱스가 바뀌는 동안 영향을 받지 않은 카드에도 리렌더링이 발생하고 있었다.
+
+기존 구조에서는 드래그 대상이나 위치가 바뀌는 과정에서 영향을 받지 않은 카드까지 반복해서 실행되었고, 같은 `KanbanCard` 안에 있던 회사명·직무·마감일 같은 공고 정보도 함께 다시 계산됐다.
+
+---
+
+## `useContext`가 문제일까?
+
+`useContext` 자체가 문제인 것은 아니다. 정렬에 참여하는 모든 카드는 자신의 위치와 정렬에 필요한 정보를 알아야 했기 때문에, 관련 상태를 구독하는 것은 필요한 작업이었다.
+
+기존 구조에서는 `useSortable`이 `dnd-kit` 내부의 정렬 상태와 드래그 상태를 구독하고 있었고, 이 훅을 호출하는 `KanbanCard`가 채용 정보와 같이 바뀌지 않는 카드 콘텐츠까지 함께 렌더링하고 있었다.
+
+위치와 정렬 정보를 구독하는 부분은 유지하되, 그 과정에서 함께 리렌더링되는 변경되지 않은 채용 정보 영역을 분리해 불필요한 렌더링을 줄이고자 했다.
+
+## `dnd-kit`을 유지한 채 컴포넌트를 나눠보기
+
+`dnd-kit`을 유지한 채 컴포넌트 분리를 시도했다. `useSortable`은 바깥쪽 `KanbanCard`에서만 호출하고, 회사명·직무·마감일을 렌더링하는 부분은 `KanbanCardContent`로 분리해 `React.memo`를 적용했다.
+
+```tsx
+const KanbanCard = memo(function KanbanCard({application, onDelete}: Props) {
+  const sortable = useSortable({id: application.id});
 
   return (
     <article
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(sortable.transform),
+      }}
+      {...sortable.attributes}
+      {...sortable.listeners}
     >
-      {/* 셸이 재실행되어도 Props 참조가 같으면 CardContent 렌더링은 건너끕니다 */}
-      <CardContent
-        company={application.company}
-        role={application.role}
-        deadline={application.deadline}
+      <KanbanCardContent
+        application={application}
         onDelete={onDelete}
       />
     </article>
   );
-}
-```
+});
 
-이제 `SortableCardShell`은 Context를 구독하고 드래그 스타일을 계산하지만, `CardContent`는 `useSortable`을 호출하지 않습니다. `company`, `role`, `deadline`, `onDelete`의 참조가 같다면 `CardContent`는 부모 셸이 다시 실행되어도 렌더링을 건너뛸 수 있습니다.
-
-이 글에서는 이 구조를 **렌더링 경계 분리(Render Boundary Isolation)**라고 부르겠습니다. React의 별도 API 이름이 아니라, “빠르게 변하는 상태를 읽는 컴포넌트와 안정적인 화면을 그리는 컴포넌트를 서로 다른 경계에 둔다”는 설계 원칙을 설명하기 위한 표현입니다.
-
-## Render Props는 무엇이고 dnd-kit 문제와 어떻게 연결되는가
-
-Render Props는 컴포넌트가 계산한 값을 함수의 인자로 넘기고, 호출자가 그 값을 사용해 무엇을 렌더링할지 결정하는 패턴입니다. 함수 이름이 반드시 `render`일 필요는 없습니다. React의 Render Props 문서도 `children`에 함수를 전달하는 방식까지 Render Props로 설명합니다. [Render Props 공식 문서](https://legacy.reactjs.org/docs/render-props.html)
-
-```tsx
-function Mouse({ children }: { children: (position: Point) => React.ReactNode }) {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-
-  useEffect(() => {
-    const handleMove = (event: MouseEvent) =>
-      setPosition({ x: event.clientX, y: event.clientY });
-
-    window.addEventListener("mousemove", handleMove);
-    return () => window.removeEventListener("mousemove", handleMove);
-  }, []);
-
-  return children(position);
-}
-
-function Screen() {
+const KanbanCardContent = memo(function KanbanCardContent({
+  application,
+  onDelete,
+}: ContentProps) {
   return (
-    <Mouse>
-      {({ x, y }) => <p>현재 좌표: {x}, {y}</p>}
-    </Mouse>
+    <div>
+      <h3>{application.company}</h3>
+      <p>{application.role}</p>
+      <span>{application.deadline}</span>
+    </div>
   );
-}
+});
 ```
 
-`@hello-pangea/dnd`의 `Draggable`도 같은 방식으로 `provided`와 `snapshot`을 자식 함수에 전달합니다.
+이렇게 나누면 `KanbanCard`가 다시 실행되더라도 `application`과 `onDelete`의 참조가 같을 때 공고 정보를 렌더링하는 컴포넌트는 `React.memo`에 의해 다시 실행되지 않을 수 있다. 하지만 `useSortable`을 호출하는 바깥 카드까지 Context 구독에서 벗어난 것은 아니다. 드래그 대상과 위치가 바뀌는 동안, 같은 정렬 Context를 구독하는 여러 `KanbanCard`가 카드 콘텐츠의 변경 여부와 관계없이 다시 실행되었다.
+
+아래 영상은 공고 정보와 위치 정보를 분리하고 `React.memo`를 적용한 뒤, 같은 카드 목록에서 다시 확인한 결과다. 영향을 받지 않은 카드의 콘텐츠를 다시 계산하는 비용은 줄일 수 있었지만, React Developer Tools의 컴포넌트별 렌더링 표시에는 움직이지 않은 카드의 `KanbanCard`도 반복해서 나타났다.
+
+<div className="not-prose my-6">
+  <VideoLink slug="jobsecretary-dnd-kit-separated" inline />
+</div>
+
+## 라이브러리 변경을 결정한 이유
+
+컴포넌트 분리로 변경되지 않은 공고 정보의 재계산은 줄일 수 있었지만, `useSortable`을 사용하는 바깥 `KanbanCard`의 Context 구독은 남아 있었다. 그래서 다음 기준으로 라이브러리 변경을 생각하게 되었다.
+
+- 드래그 상태와 카드 콘텐츠를 분리할 수 있는가
+- 영향을 받지 않은 카드에 상태 업데이트가 전달되는 범위를 줄일 수 있는가
+- 네 개의 세로 목록으로 구성된 현재 칸반보드에 적합한가
+
+자유 배치나 2차원 그리드에는 적합하지 않지만, 우리 서비스에서는 네 개의 세로 목록 사이에서 카드를 이동하는 기능만 필요했기 때문에 충분하다고 생각했다. 현재 칸반보드에 필요한 조건을 충족하는 `@hello-pangea/dnd`로 변경하게 되었다.
+
+## 항목별 상태 구독과 Render Props
+
+`@hello-pangea/dnd`가 영향을 받지 않은 카드의 리렌더링을 줄일 수 있는 이유는 내부에서 각 `Draggable`이 자신의 ID를 현재 드래그 상태와 비교해 필요한 값만 계산하기 때문이다. 모든 카드가 드래그 상태 전체를 동일하게 전달받는 것이 아니라, 현재 드래그 중인 카드에는 위치 정보를, 자리를 비켜줘야 하는 카드에는 이동 정보를 전달한다. 드래그와 관계없는 카드는 이전 결과를 그대로 유지하기 때문에, 선택한 결과가 바뀐 카드만 업데이트되고 다른 카드의 컴포넌트 실행에는 영향을 주지 않는다.
+
+`Render Props`는 컴포넌트가 JSX를 직접 정해 렌더링하는 대신, JSX를 반환하는 함수를 Prop으로 받아 필요한 데이터를 그 함수의 인자로 전달하는 패턴이다. `children`에 함수를 전달하는 방식도 Render Props에 포함되며, 상태와 동작을 관리하는 컴포넌트와 실제로 그릴 UI를 분리할 수 있다. [Render Props 패턴 설명](https://patterns-dev-kr.github.io/design-patterns/render-props-pattern/)
+
+`@hello-pangea/dnd`의 `Draggable`은 이 패턴을 사용해 `provided`와 `snapshot`을 자식 함수에 전달한다. 라이브러리는 드래그 상태와 연결 정보를 관리하고, 애플리케이션은 기존 카드 UI에서 필요한 DOM 구조를 직접 결정할 수 있다.
 
 ```tsx
 <Draggable draggableId={application.id} index={index}>
   {(provided, snapshot) => (
     <KanbanCard
       application={application}
+      onDelete={onDelete}
       provided={provided}
       isDragging={snapshot.isDragging}
-      onDelete={onDelete}
     />
   )}
 </Draggable>
 ```
 
-여기서 `provided`에는 `innerRef`, `draggableProps`, `dragHandleProps`가 들어 있고, `snapshot.isDragging`은 현재 아이템의 드래그 여부를 표현합니다. 라이브러리가 계산한 값을 애플리케이션 컴포넌트에 전달하는 API이지, Render Props 자체가 렌더링을 줄이는 알고리즘은 아닙니다.
+## 드래그 연결과 카드 콘텐츠를 나누기
 
-오히려 Render Props에는 주의할 점도 있습니다. 다음처럼 매 렌더링마다 새 함수를 만들면 함수 참조가 바뀝니다.
-
-```tsx
-<PureWrapper render={(value) => <Card value={value} />} />
-```
-
-React의 문서도 Render Props 함수를 `render` 안에서 새로 만들면 `PureComponent`의 얕은 비교 이점을 무효화할 수 있다고 설명합니다. 따라서 Render Props를 썼다는 이유만으로 부모와 자식이 자동으로 메모이제이션되는 것은 아닙니다. [Render Props의 주의점](https://legacy.reactjs.org/docs/render-props.html#be-careful-when-using-render-props-with-reactpurecomponent)
-
-이번 사례에서 Render Props가 유용했던 이유는 “성능 마법”이 아니라, 라이브러리 값과 카드 UI의 접점을 눈에 보이게 만들었기 때문입니다.
-
-```text
-Draggable의 render prop
-  └─ 드래그 연결 정보와 snapshot을 받는 KanbanCardShell
-       └─ 일반 Props만 받는 memo(KanbanCardContent)
-```
-
-## JobSecretary에서 실제로 바꾼 구조
-
-JobSecretary의 현재 칸반 구현은 `DragDropContext`, `Droppable`, `Draggable`을 사용하는 `@hello-pangea/dnd` 기반입니다. 컬럼은 `Droppable`의 render prop으로 `provided.innerRef`, `provided.droppableProps`, `snapshot.isDraggingOver`를 받고, 카드 목록은 `Draggable`의 render prop으로 `provided`와 `snapshot`을 받습니다. [kanban-column.tsx](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-column.tsx)
-
-```tsx
-<Droppable droppableId={status}>
-  {(provided, snapshot) => (
-    <section
-      ref={provided.innerRef}
-      {...provided.droppableProps}
-      data-dragging-over={snapshot.isDraggingOver}
-    >
-      {applications.map((application, index) => (
-        <Draggable
-          key={application.id}
-          draggableId={application.id}
-          index={index}
-        >
-          {(provided, snapshot) => (
-            <KanbanCard
-              application={application}
-              provided={provided}
-              isDragging={snapshot.isDragging}
-              onDelete={onDelete}
-            />
-          )}
-        </Draggable>
-      ))}
-      {provided.placeholder}
-    </section>
-  )}
-</Droppable>
-```
-
-카드 파일에서는 드래그 셸과 콘텐츠를 분리하고 콘텐츠에 `memo`를 적용했습니다. 콘텐츠는 `application`과 `onDelete`만 받으며 `Draggable`의 `provided`나 `snapshot`을 직접 알지 않습니다. [kanban-card.tsx](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-card.tsx)
+Render Props 코드에서 `snapshot.isDragging`을 `isDragging` Prop으로 전달하고, `provided`는 드래그 가능한 DOM에 연결한다. 회사명·직무·마감일·상태 배지는 카드 데이터만으로 렌더링하도록 나눴다. 핵심 구조는 다음과 같다.
 
 ```tsx
 const KanbanCardContent = memo(function KanbanCardContent({
@@ -362,12 +364,14 @@ const KanbanCardContent = memo(function KanbanCardContent({
   const router = useRouter();
   const dDay = getDDay(application.deadline);
 
+  const handleClick = () => {
+    router.push(`/document/${application.id}?from=dashboard`);
+  };
+
+  // 회사명·직무·마감일·상태 배지·삭제 버튼을 렌더링한다.
   return (
-    <div onClick={() => router.push(`/document/${application.id}`)}>
-      <h3>{application.company}</h3>
-      <p>{application.role}</p>
-      <p>{formatDeadline(application.deadline)}</p>
-      <button onClick={() => onDelete(application.id)}>삭제</button>
+    <div onClick={handleClick} className="cursor-pointer">
+      {/* 카드 정보 */}
     </div>
   );
 });
@@ -379,7 +383,7 @@ export function KanbanCard({
   isDragging,
 }: KanbanCardProps) {
   const card = (
-    <article
+    <div
       ref={provided.innerRef}
       {...provided.draggableProps}
       {...provided.dragHandleProps}
@@ -389,7 +393,7 @@ export function KanbanCard({
         application={application}
         onDelete={onDelete}
       />
-    </article>
+    </div>
   );
 
   return isDragging && typeof document !== "undefined"
@@ -398,232 +402,44 @@ export function KanbanCard({
 }
 ```
 
-여기서 `KanbanCard`가 드래그 상태에 따라 다시 실행되는 것과 `KanbanCardContent`가 실제 DOM을 다시 만드는 것은 분리됩니다. 다만 `application` 객체가 상위에서 매번 새로 만들어지거나 `onDelete`가 매 렌더링마다 새 함수로 생성되면 `memo`도 다시 실행됩니다. 따라서 다음과 같은 상위 코드도 함께 확인해야 합니다.
+`KanbanCard`는 드래그 연결 정보를 사용하고, `KanbanCardContent`에는 `application`과 `onDelete`만 전달한다. 부모가 다시 실행되어도 두 Props의 참조가 같다면 `React.memo`가 공고 정보 영역의 실행을 건너뛸 수 있다.
+
+## UI 깨짐 해결
+
+`@hello-pangea/dnd`로 변경한 뒤에도 드래그 중인 카드가 보드의 `overflow`에 잘리고, 부모 요소의 `transform`처럼 위치 기준이나 쌓임 순서를 바꾸는 CSS의 영향을 받는 문제가 남았다. 그래서 드래그 중인 카드만 `createPortal`을 사용해 `document.body` 아래로 옮겼다.
 
 ```tsx
-const handleDelete = useCallback((id: string) => {
-  deleteApplication(id);
-}, [deleteApplication]);
-
-const applications = useMemo(() => {
-  return documentsByStatus[status];
-}, [documentsByStatus, status]);
-```
-
-`memo`에 객체 전체를 넘기는 대신 콘텐츠가 실제로 필요로 하는 최소한의 필드만 넘기는 것도 좋은 방법입니다. React 공식 문서 역시 Props를 최소화하고, 불필요하게 새 객체를 만들지 않는 방식을 권장합니다. [Props 변경을 줄이는 memo 사용법](https://react.dev/reference/react/memo#minimizing-props-changes)
-
-## 라이브러리를 꼭 바꿔야 했을까
-
-리렌더링 문제만 놓고 보면 꼭 바꿀 필요는 없었습니다. `dnd-kit`에서도 다음처럼 `useSortable`을 외곽 셸에만 두고, 카드 콘텐츠를 순수 컴포넌트로 분리할 수 있습니다.
-
-```tsx
-const SortableCardContent = memo(function SortableCardContent({
-  company,
-  role,
-  deadline,
-}: {
-  company: string;
-  role: string;
-  deadline: string;
-}) {
-  return (
-    <>
-      <h3>{company}</h3>
-      <p>{role}</p>
-      <p>{deadline}</p>
-    </>
-  );
-});
-
-function SortableCard({ application }: { application: Application }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-  } = useSortable({ id: application.id });
-
-  return (
-    <article
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-      }}
-      {...attributes}
-    >
-      <button ref={setActivatorNodeRef} {...listeners} aria-label="드래그 핸들">
-        이동
-      </button>
-      <SortableCardContent
-        company={application.company}
-        role={application.role}
-        deadline={application.deadline}
-      />
-    </article>
-  );
+if (isDragging && typeof document !== "undefined") {
+  return createPortal(card, document.body);
 }
+
+return card;
 ```
 
-따라서 `@hello-pangea/dnd`로의 전환을 다음 두 가지로 구분해서 판단해야 합니다.
+`createPortal`은 React 트리와의 관계는 유지한 채, DOM 트리에서 렌더링되는 물리적 위치만 바꾸는 기능이다. 이를 활용해 드래그 중인 카드를 기존 부모 DOM에서 분리하고, 부모 요소의 CSS 영향을 받아 UI가 깨지는 문제를 해결했다.
 
-| 판단 기준 | 라이브러리 교체가 필요한가 |
-| --- | --- |
-| 드래그 상태와 카드 콘텐츠의 렌더링 범위를 분리 | 아니오. `dnd-kit`에서도 가능 |
-| Render Props 형태의 `provided`·`snapshot` API가 팀에 더 읽기 쉬운가 | 팀의 선호와 기존 코드에 따라 다름 |
-| 키보드 접근성, 센서, 다중 컨테이너 동작을 바꾸고 싶은가 | 기능 비교 후 별도 판단 |
-| 현재 구현의 버그·유지보수 비용이 라이브러리 교체 비용보다 큰가 | 실제 기능·테스트 범위를 비교해야 함 |
+## 같은 데이터와 시나리오로 다시 확인하기
 
-즉 이번 개선 결과를 “라이브러리를 교체했더니 리렌더링이 0이 됐다”로 기록하면 원인과 결과를 과도하게 단순화하게 됩니다. 실제로는 Render Props로 전달 방식을 바꾼 것, 카드 셸과 콘텐츠를 나눈 것, 콘텐츠에 `memo`를 적용한 것, Props 참조를 안정화한 것이 함께 작용했습니다.
+| 단계 | Profiler 전체 커밋 | 컴포넌트별 렌더링 표시 | 확인한 내용 |
+| --- | ---: | --- | --- |
+| 초기 `dnd-kit` 구조 | 271회 | 영향을 받지 않은 카드 약 268~269회 | 드래그 로직과 공고 정보가 한 카드에서 함께 실행됨 |
+| `dnd-kit` 유지 + 콘텐츠 분리 | 191회 | 드래그 중인 카드 바깥 컴포넌트 184회, 영향을 받지 않은 카드 27회 | 공고 정보는 `React.memo`로 분리됐지만 바깥 카드의 실행은 남음 |
+| `@hello-pangea/dnd` 적용 후 | 98회 | 영향을 받지 않은 카드 0회 | 영향을 받지 않은 카드의 반복 실행이 사라짐 |
 
-## Portal은 성능 최적화인가, DOM 배치 최적화인가
+`dnd-kit`을 유지한 채 콘텐츠만 분리했을 때는 드래그 중인 카드 바깥 컴포넌트가 184회, 영향을 받지 않은 카드의 바깥 컴포넌트가 27회 반복해서 실행되었다. 반면 `@hello-pangea/dnd`로 변경한 뒤에는 드래그와 관계없는 카드의 렌더링 표시가 0회로 줄었다. 컴포넌트 분리는 드래그 상태와 함께 실행되던 채용 정보의 렌더링을 줄였고, 라이브러리 변경은 영향을 받지 않은 카드에 업데이트가 전달되는 범위를 줄일 수 있었다.
 
-`React Portal`은 React 트리에서 논리적으로는 같은 위치에 있는 JSX를 다른 DOM 컨테이너에 렌더링하는 기능입니다. React 공식 문서에 따르면 Portal로 렌더링된 자식은 React 트리의 일부이므로 Context와 이벤트 전파는 React 트리 기준으로 동작합니다. [createPortal 공식 문서](https://react.dev/reference/react-dom/createPortal)
+## 참고 자료
 
-JobSecretary에서는 드래그 중인 카드를 `document.body`로 옮겨 윈도우 스크롤, `overflow`, `z-index`, stacking context의 영향을 줄였습니다.
-
-```tsx
-const card = (
-  <article
-    ref={provided.innerRef}
-    {...provided.draggableProps}
-    {...provided.dragHandleProps}
-    style={provided.draggableProps.style}
-  >
-    <KanbanCardContent application={application} onDelete={onDelete} />
-  </article>
-);
-
-return isDragging && typeof document !== "undefined"
-  ? createPortal(card, document.body)
-  : card;
-```
-
-Portal이 해결하는 것은 다음과 같습니다.
-
-- 스크롤 컨테이너가 자식의 시각적 영역을 잘라내는 문제
-- 부모의 stacking context 때문에 드래그 카드가 뒤로 숨는 문제
-- 문서 전체를 스크롤하는 환경에서 카드의 이동 기준이 어긋나는 문제
-
-Portal이 해결하지 않는 것은 다음과 같습니다.
-
-- `useSortable` Context 소비자의 재실행
-- Props 참조가 매번 바뀌는 문제
-- 카드 콘텐츠가 드래그 상태를 직접 구독하는 문제
-- 정렬 전략 계산 자체의 비용
-
-`dnd-kit`에서는 같은 목적을 위해 `DragOverlay`를 사용할 수도 있습니다. 공식 문서는 스크롤 컨테이너 안의 draggable이나 컨테이너 사이를 이동하는 아이템에는 `DragOverlay`를 권장하고, 필요하면 `createPortal(<DragOverlay />, document.body)` 형태로 다른 DOM 컨테이너에 렌더링할 수 있다고 설명합니다. [DragOverlay 공식 문서](https://docs.dndkit.com/api-documentation/draggable/drag-overlay)
-
-```tsx
-function Board() {
-  const [activeId, setActiveId] = useState<string | null>(null);
-
-  return (
-    <DndContext
-      onDragStart={({ active }) => setActiveId(String(active.id))}
-      onDragEnd={() => setActiveId(null)}
-      onDragCancel={() => setActiveId(null)}
-    >
-      <SortableList />
-
-      {createPortal(
-        <DragOverlay>
-          {activeId ? <CardPreview id={activeId} /> : null}
-        </DragOverlay>,
-        document.body,
-      )}
-    </DndContext>
-  );
-}
-```
-
-`DragOverlay`의 자식은 `useDraggable`나 `useSortable`을 다시 호출하지 않는 표현용 컴포넌트로 두는 것이 좋습니다. 드래그 로직을 시각적 카드와 분리하라는 공식 문서의 presentational component 패턴도 이 렌더링 경계 분리와 같은 방향입니다.
-
-## 개선 과정에서 확인한 것과 확인하지 않은 것
-
-이번 수치에서 확실하게 말할 수 있는 것은 같은 프로젝트의 같은 드래그 시나리오에서 Profiler에 기록된 렌더링 범위가 줄었다는 사실입니다. 다음 항목은 별도 실험 없이는 단정하지 않았습니다.
-
-| 질문 | 이번 글의 판단 |
-| --- | --- |
-| 모든 브라우저에서 63.8%가 재현되는가 | 확인하지 않음 |
-| 카드 수가 10배가 되어도 같은 비율인가 | 확인하지 않음 |
-| 사용자 입력 지연이나 FPS가 같은 비율로 개선되는가 | Profiler 수치만으로 단정하지 않음 |
-| 라이브러리 교체만으로 개선되었는가 | 아님. 여러 구조 변경의 결합 결과 |
-| `dnd-kit`을 유지해도 같은 렌더링 경계가 가능한가 | 가능. 위의 셸·콘텐츠 분리로 구현 가능 |
-
-Profiler에서 “렌더링 횟수”를 줄이는 것은 목표가 아니라 단서입니다. 실제 사용자가 느끼는 지연을 확인하려면 카드 수, 브라우저, Production build, 입력 장치, 긴 텍스트·이미지 로딩 여부를 고정하고 commit time, interaction latency, frame drop도 함께 측정해야 합니다.
-
-## 재현 시 확인할 체크리스트
-
-비슷한 문제가 생겼을 때는 라이브러리를 먼저 교체하기보다 다음 순서로 확인하는 것이 안전합니다.
-
-1. React Profiler에서 드래그 시작부터 종료까지 한 번의 interaction을 기록합니다.
-2. 실제로 다시 실행된 컴포넌트와 DOM이 변경된 컴포넌트를 구분합니다.
-3. `useSortable` 또는 `useDraggable`을 호출하는 컴포넌트가 카드 콘텐츠까지 직접 그리는지 확인합니다.
-4. Context를 읽는 셸과 Context를 읽지 않는 `memo` 콘텐츠를 분리합니다.
-5. 콘텐츠에 넘기는 객체·함수 Props의 참조가 안정적인지 확인합니다.
-6. 정렬 전략, 측정 빈도, 가상화 여부를 카드 수와 함께 검토합니다.
-7. 스크롤·`overflow`·`z-index` 문제가 따로 있다면 `DragOverlay` 또는 Portal을 적용합니다.
-8. 같은 시나리오를 Production build에서도 다시 측정합니다.
-
-## 자주 묻는 질문
-
-### `useSortable`을 쓰면 모든 카드가 항상 리렌더링되나요?
-
-아닙니다. `useSortable`은 상위 `SortableContext` 정보를 읽기 때문에 Context 변경의 영향을 받을 수 있지만, 실제 재실행 범위는 컴포넌트 트리와 Props 구조에 따라 달라집니다. 정렬 셸과 카드 콘텐츠를 분리하면 콘텐츠의 불필요한 재실행을 줄일 수 있습니다.
-
-### `React.memo`만 적용하면 해결되나요?
-
-대부분의 경우 충분하지 않습니다. 컴포넌트가 Context를 직접 읽거나 객체·함수 Props가 매번 새로 만들어지면 `memo`의 비교가 통과하지 못할 수 있습니다. Context를 읽는 부분을 외곽으로 이동하고, 안쪽에는 안정적인 최소 Props만 전달해야 합니다.
-
-### Render Props가 리렌더링을 막아 주나요?
-
-아닙니다. Render Props는 계산된 값을 함수 인자로 전달하는 API 패턴입니다. 이번 사례에서는 `provided`와 `snapshot`을 드래그 셸에서만 소비하도록 경계를 만드는 데 도움이 됐습니다.
-
-### Render Props와 render boundary isolation은 같은 개념인가요?
-
-아닙니다. Render Props는 값을 전달하는 방식이고, render boundary isolation은 자주 변하는 상태와 안정적인 UI를 서로 다른 컴포넌트 경계에 배치하는 설계입니다. Render Props 없이도 경계를 만들 수 있고, Render Props를 사용해도 경계를 잘못 잡으면 모든 UI가 다시 실행될 수 있습니다.
-
-### Portal을 적용하면 리렌더링이 줄어드나요?
-
-Portal의 주목적은 DOM 배치입니다. React 트리와 Context 구독은 유지되므로 Portal만으로 `useSortable` 소비자의 리렌더링이 사라지지는 않습니다. `overflow`, stacking context, 스크롤 기준을 분리해야 할 때 사용합니다.
-
-### 결국 `dnd-kit`을 바꿔야 하나요?
-
-리렌더링 경계 문제만으로는 바꿀 필요가 없습니다. `dnd-kit`에서도 `useSortable`을 외곽 셸에 두고 `memo` 콘텐츠를 안쪽에 배치할 수 있습니다. 다만 팀의 API 선호, 접근성 요구, 센서·다중 컨테이너 동작, 기존 테스트와 유지보수 비용까지 비교해 라이브러리 선택을 결정해야 합니다.
-
-## 정리
-
-이번 문제를 통해 확인한 것은 “어떤 DnD 라이브러리가 더 빠른가”보다 “어떤 컴포넌트가 빠르게 변하는 상태를 구독하고 있는가”가 먼저라는 사실입니다.
-
-`dnd-kit`의 `SortableContext`와 `useSortable`은 정렬 기능을 만들기 위해 Context로 필요한 정보를 전파합니다. 이 설계는 정상적인 기능 동작을 위한 것이지만, Context를 구독하는 카드 컴포넌트 안에 무거운 콘텐츠까지 넣으면 드래그 중 업데이트 비용이 넓어집니다.
-
-해결은 세 층으로 나뉩니다.
-
-- **상태 구독 경계**: `useSortable` 또는 `Draggable` 연결 정보는 외곽 셸이 담당합니다.
-- **콘텐츠 경계**: 카드 데이터만 받는 순수 컴포넌트를 `memo`로 감쌉니다.
-- **DOM 배치 경계**: 스크롤·`overflow` 문제가 있을 때 `DragOverlay`나 `createPortal`을 사용합니다.
-
-Render Props는 이 경계를 표현하기 좋은 API일 뿐이고, Portal은 렌더링 성능을 위한 만능 해법이 아닙니다. 먼저 Profiler로 구독 범위를 확인하고, 라이브러리를 유지하든 교체하든 같은 원칙으로 렌더링 경계를 다시 설계해야 합니다.
-
-## 참고 자료와 조사 범위
-
-아래 자료는 2026년 7월 26일에 확인했습니다. 공식 문서의 설명, 공식 저장소의 현재 소스, JobSecretary 공개 저장소의 실제 구현, 프로젝트에서 기록한 Profiler 수치를 서로 구분해 사용했습니다.
-
-| 출처 | 본문에서 확인한 내용 |
-| --- | --- |
-| [dnd-kit Sortable 개요](https://docs.dndkit.com/presets/sortable) | `SortableContext`와 `useSortable`의 역할, `useSortable`이 draggable·droppable을 조합한다는 설명 |
-| [dnd-kit SortableContext 문서](https://docs.dndkit.com/presets/sortable/sortable-context) | `items`의 정렬 순서, sorting strategy, Context 기반 구조 |
-| [dnd-kit useSortable 문서](https://docs.dndkit.com/presets/sortable/usesortable) | `transform`, `transition`, `setNodeRef`, listeners, activator의 의미 |
-| [dnd-kit `SortableContext.tsx`](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/components/SortableContext.tsx) | `useDndContext`, `activeIndex`, `overIndex`, `sortedRects`, Context value 생성 흐름 |
-| [dnd-kit `useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/master/packages/sortable/src/hooks/useSortable.ts) | `useContext`, `useDraggable`, `useDroppable`, transform 계산과 반환값 |
-| [dnd-kit DragOverlay 문서](https://docs.dndkit.com/api-documentation/draggable/drag-overlay) | scrollable container에서 Overlay를 권장하는 이유, Portal 적용 방법, presentational component 패턴 |
-| [React `memo`](https://react.dev/reference/react/memo) | Context 변경, Props 참조 안정화, 최소 Props 설계에 관한 기준 |
-| [React `createPortal`](https://react.dev/reference/react-dom/createPortal) | DOM 컨테이너 이동과 React 트리·이벤트 전파의 관계 |
-| [React Render Props](https://legacy.reactjs.org/docs/render-props.html) | 함수 자식, `children` 함수, 새 함수 참조가 PureComponent에 미치는 주의점 |
-| [JobSecretary `kanban-card.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-card.tsx) | `memo` 카드 콘텐츠, `createPortal`, `@hello-pangea/dnd` provided/snapshot 사용 |
-| [JobSecretary `kanban-column.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-column.tsx) | `Droppable`·`Draggable` Render Props와 컬럼 구성 |
-
-관련 프로젝트: [JobSecretary 프로젝트 상세 페이지](/projects/jobsecretary)
+- [JobSecretary 초기 dnd-kit `KanbanCard.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/c27355c/features/document-kanban/ui/KanbanCard.tsx)
+- [JobSecretary hello-pangea/dnd 적용 후 `KanbanCard.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/44d6259/features/document-kanban/ui/KanbanCard.tsx)
+- [JobSecretary 현재 `kanban-card.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-card.tsx)
+- [dnd-kit `useSortable` 공식 문서](https://dndkit.com/legacy/presets/sortable/use-sortable/)
+- [dnd-kit 10.0.0 `SortableContext.tsx`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/components/SortableContext.tsx)
+- [dnd-kit 10.0.0 `useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)
+- [hello-pangea/dnd 공식 저장소와 지원 범위](https://github.com/hello-pangea/dnd)
+- [hello-pangea/dnd `Draggable` 공식 문서](https://github.com/hello-pangea/dnd/blob/main/docs/api/draggable.md)
+- [hello-pangea/dnd `connected-draggable.ts`](https://github.com/hello-pangea/dnd/blob/main/src/view/draggable/connected-draggable.ts)
+- [hello-pangea/dnd reparenting 공식 가이드](https://github.com/hello-pangea/dnd/blob/main/docs/guides/reparenting.md)
+- [React `memo` 공식 문서](https://react.dev/reference/react/memo)
+- [React `createPortal` 공식 문서](https://react.dev/reference/react-dom/createPortal)
+- [React Render Props 문서](https://legacy.reactjs.org/docs/render-props.html)

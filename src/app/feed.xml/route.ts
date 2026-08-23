@@ -2,7 +2,7 @@ import { getAllPosts } from "@/lib/mdx";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 
 export function GET() {
-  const posts = getAllPosts("blog");
+  const posts = getAllPosts("blog").filter((post) => post.published);
 
   const itemsXml = posts
     .map((post) => {

@@ -89,12 +89,12 @@ export default function InteractiveResume() {
                 </h4>
                 <span className="text-xs font-mono text-foreground/70 bg-foreground/5 px-2.5 py-1 rounded-full border border-card-border">2025.11 ~ 2025.12</span>
               </div>
-              <p className="text-xs md:text-sm font-mono text-accent-blue/90 mb-2.5 font-bold">Next.js 15, TypeScript, React Hook Form, TanStack Query, Zustand, Gemini API, Supabase</p>
+              <p className="text-xs md:text-sm font-mono text-accent-blue/90 mb-2.5 font-bold">Next.js, TypeScript, React Hook Form, TanStack Query, Zustand, Gemini API, Supabase</p>
               <p className="text-sm font-normal text-foreground/90 leading-relaxed mb-4">
                채용 공고와 지원 현황, 자기소개서, PDF 변환, AI 면접 질문 생성을 하나의 흐름으로 연결한 취업 준비 관리 서비스입니다.
              </p>
               <ul className="list-disc pl-4 text-sm font-normal text-foreground/90 space-y-2.5 leading-relaxed">
-               <li><strong>칸반보드 렌더링 최적화</strong>: React Developer Tools Profiler에서 동일한 드래그 시나리오를 비교해 전체 커밋 271회에서 98회, 비활성 카드 리렌더링 268회에서 0회로 감소</li>
+               <li><strong>칸반 보드 렌더링 최적화</strong>: 드래그 상태와 카드 콘텐츠의 렌더링 경계를 분리해 불필요한 카드 리렌더링을 줄임</li>
                <li><strong>자기소개서 작성 안정화</strong>: React Hook Form의 비제어 입력과 isDirty 기반 이탈 경고로 폼 입력과 서버 저장 시점을 분리</li>
                <li><strong>FSD 패턴 적용</strong>: App·Widgets·Features·Entities·Shared 계층으로 페이지 조립, 사용자 기능, 도메인 모델의 책임과 의존성 방향을 정리</li>
              </ul>
@@ -236,11 +236,12 @@ export default function InteractiveResume() {
          </div>
          <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
            {[
-             { title: "2024 클라우드 아이디어 공모전 대상", org: "부산광역시장상", date: "2024.12.24" },
-             { title: "2024 한이음 ICT멘토링 공모전 은상", org: "정보통신기획평가원장상", date: "2024.12.04" },
-             { title: "2025 한이음 드림업 공모전 장려상", org: "한국정보산업연합회장상", date: "2025.11.19" },
-             { title: "숭실 발명아이디어 경진대회 최우수상", org: "숭실대학교 총장상", date: "2024.11.22" },
-             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", date: "2025.10.01" }
+             { title: "2024 클라우드 아이디어 공모전 대상", org: "부산광역시장상", host: "(재)부산정보산업진흥원, (주)더존비즈온", date: "2024.12.24" },
+             { title: "2024 한이음 ICT멘토링 공모전 은상", org: "정보통신기획평가원장상", host: "과학기술정보통신부/정보통신기획평가원", date: "2024.12.04" },
+             { title: "2025 한이음 드림업 공모전 장려상", org: "한국정보산업연합회장상", host: "과학기술정보통신부/한국정보산업연합회", date: "2025.11.19" },
+             { title: "숭실 발명아이디어 경진대회 최우수상", org: "숭실대학교 총장상", host: "숭실대학교", date: "2024.11.22" },
+             { title: "제 15회 숭실캡스톤디자인 경진대회 장려상", org: "숭실대학교 총장상", host: "숭실대학교", date: "2025.10.01" },
+             { title: "Pre-스타트업 창업경진대회 창업아이템 최종 선정", org: "창업 사무실 입주", host: "숭실대학교 캠퍼스타운", date: "2025.05.27" }
            ]
              // 날짜를 기준으로 최신순 정렬 (Desc)
              .sort((a, b) => new Date(b.date.replace(/\./g, "-")).getTime() - new Date(a.date.replace(/\./g, "-")).getTime())
@@ -249,7 +250,10 @@ export default function InteractiveResume() {
                  <CheckCircle2 className="w-4 h-4 text-accent-blue shrink-0 mt-0.5" />
                   <div className="text-sm leading-snug">
                     <p className="font-semibold text-foreground text-sm">{award.title}</p>
-                    <p className="text-xs text-foreground/70 mt-1 font-normal">{award.org} | {award.date}</p>
+                    <p className="text-xs text-foreground/70 mt-1 font-normal">
+                      <span>{award.org} | {award.date}</span>
+                      {award.host ? <span className="block mt-0.5">주최: {award.host}</span> : null}
+                    </p>
                  </div>
                </div>
              ))}
@@ -308,32 +312,42 @@ export default function InteractiveResume() {
              <span>기술 스택</span>
            </h3>
          </div>
-         <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-3 gap-4">
-           {/* 1. Language */}
+         <div className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+           {/* 1. Frontend */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Language</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Frontend</span>
               <div className="flex flex-wrap gap-1.5">
-               {["HTML", "CSS", "JavaScript", "TypeScript", "Java", "Dart"].map(tech => (
+               {["HTML", "CSS", "JavaScript", "TypeScript", "React", "Next.js", "Flutter", "Dart", "Styled-components", "Tailwind CSS", "Zustand", "TanStack Query", "Riverpod"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>
            </div>
 
-           {/* 2. Core Frameworks & Libraries */}
+           {/* 2. Backend */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Core Frameworks & Libraries</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Backend</span>
               <div className="flex flex-wrap gap-1.5">
-               {["React", "Next.js", "Flutter", "Spring Boot"].map(tech => (
+               {["Java", "Spring Boot", "Thymeleaf", "MyBatis"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>
            </div>
 
-           {/* 3. Other */}
+           {/* 3. BaaS / Cloud Services */}
            <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
-              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Other</span>
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">BaaS / Cloud Services</span>
               <div className="flex flex-wrap gap-1.5">
-               {["Styled-components", "Tailwind CSS", "Zustand", "TanStack Query", "Riverpod"].map(tech => (
+               {["Firebase", "Supabase"].map(tech => (
+                  <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
+               ))}
+              </div>
+           </div>
+
+           {/* 4. Database & Infra */}
+           <div className="p-5 rounded-xl border border-card-border bg-foreground/5 space-y-3">
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-accent-blue font-bold">Database &amp; Infra</span>
+              <div className="flex flex-wrap gap-1.5">
+               {["Oracle", "Redis"].map(tech => (
                   <span key={tech} className="text-xs md:text-sm font-mono px-2.5 py-1 rounded bg-background border border-card-border text-foreground font-semibold">{tech}</span>
                ))}
               </div>

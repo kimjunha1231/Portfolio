@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { getAllPosts, getLatestLastModified } from "@/lib/mdx";
+import { getAllVideos } from "@/lib/videos";
 import {
   formatDateForSitemap,
   SITE_LAST_MODIFIED,
@@ -7,8 +8,8 @@ import {
 } from "@/lib/site";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const blogPosts = getAllPosts("blog");
-  const projects = getAllPosts("projects");
+  const blogPosts = getAllPosts("blog").filter((post) => post.published);
+  const projects = getAllPosts("projects").filter((project) => project.published);
   const latestSiteUpdate = getLatestLastModified(
     [...blogPosts, ...projects, { lastModified: SITE_LAST_MODIFIED }],
     SITE_LAST_MODIFIED,
@@ -29,6 +30,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: new URL("/blog", SITE_URL).toString(),
       lastModified: latestBlogUpdate,
     },
+    {
+      url: new URL("/videos", SITE_URL).toString(),
+      lastModified: getLatestLastModified(
+        getAllVideos().map((video) => ({ lastModified: video.uploadDate })),
+        SITE_LAST_MODIFIED,
+      ),
+    },
     ...projects.map((project) => ({
       url: new URL(`/projects/${project.slug}`, SITE_URL).toString(),
       lastModified:
@@ -37,6 +45,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...blogPosts.map((post) => ({
       url: new URL(`/blog/${post.slug}`, SITE_URL).toString(),
       lastModified: formatDateForSitemap(post.lastModified) ?? SITE_LAST_MODIFIED,
+    })),
+    ...getAllVideos().map((video) => ({
+      url: new URL(`/videos/${video.slug}`, SITE_URL).toString(),
+      lastModified: formatDateForSitemap(video.uploadDate) ?? SITE_LAST_MODIFIED,
     })),
   ];
 }

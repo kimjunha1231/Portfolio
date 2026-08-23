@@ -14,6 +14,7 @@ import {
 import { PERSON_NAME } from "@/lib/site";
 import CopyMarkdownButton from "@/components/shared/CopyMarkdownButton";
 import StructuredData from "@/components/shared/StructuredData";
+import VideoLink from "@/components/shared/VideoLink";
 import ZoomableImage from "@/components/shared/ZoomableImage";
 import {
   PROJECT_PLATFORM_LABELS,
@@ -36,7 +37,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const project = getPostBySlug("projects", slug);
 
-  if (!project) {
+  if (!project || !project.published) {
     notFound();
   }
 
@@ -47,7 +48,7 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
   const { slug } = await params;
   const project = getPostBySlug("projects", slug);
 
-  if (!project) {
+  if (!project || !project.published) {
     notFound();
   }
 
@@ -130,6 +131,18 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
                 <span>GitHub 저장소</span>
               </a>
             )}
+            {project.demoUrl && (
+              <a
+                href={project.demoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full bg-accent-blue px-4 py-2 text-xs font-mono text-white transition-colors hover:bg-accent-blue/85"
+                aria-label={`${project.title} 서비스 열기`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>서비스 열기</span>
+              </a>
+            )}
             <CopyMarkdownButton content={cleanMarkdownContent} />
           </div>
         </div>
@@ -154,7 +167,7 @@ export default async function ProjectPostPage({ params }: ProjectPostPageProps) 
         <MDXRemote
           source={project.content}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
-          components={{ img: ZoomableImage, ZoomableImage }}
+          components={{ img: ZoomableImage, VideoLink, ZoomableImage }}
         />
       </div>
 

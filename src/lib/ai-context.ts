@@ -1,4 +1,9 @@
-import { estimateTokens, getAllPosts, toRawMarkdown } from "@/lib/mdx";
+import {
+  estimateTokens,
+  getAllPosts,
+  toRawMarkdown,
+  type ContentGeo,
+} from "@/lib/mdx";
 import {
   CONTACT_EMAIL,
   GITHUB_URL,
@@ -17,12 +22,14 @@ function getContentIndexMetadata(post: {
   lastModified: string;
   category?: string;
   tags?: string[];
+  geo?: ContentGeo;
 }) {
   return [
     `게시일: ${post.date}`,
     `최종 업데이트: ${post.lastModified}`,
     post.category ? `분류: ${post.category}` : "",
     post.tags?.length ? `태그: ${post.tags.join(", ")}` : "",
+    post.geo ? `지역: ${post.geo.name}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -38,8 +45,8 @@ const profileSummary = [
 ].join("\n");
 
 export function getLlmsIndex() {
-  const blogPosts = getAllPosts("blog");
-  const projects = getAllPosts("projects");
+  const blogPosts = getAllPosts("blog").filter((post) => post.published);
+  const projects = getAllPosts("projects").filter((project) => project.published);
 
   return [
     `# ${SITE_NAME}`,
@@ -78,8 +85,8 @@ export function getLlmsIndex() {
 }
 
 export function getLlmsFullText() {
-  const blogPosts = getAllPosts("blog");
-  const projects = getAllPosts("projects");
+  const blogPosts = getAllPosts("blog").filter((post) => post.published);
+  const projects = getAllPosts("projects").filter((project) => project.published);
 
   return [
     `# ${SITE_NAME} - Full Context`,
@@ -96,6 +103,7 @@ export function getLlmsFullText() {
       `- URL: ${absoluteUrl(`/projects/${project.slug}`)}`,
       `- Published: ${project.date}`,
       `- Last modified: ${project.lastModified}`,
+      ...(project.geo ? [`- Service area: ${project.geo.name}`] : []),
       `- Estimated tokens: ${estimateTokens(toRawMarkdown(project))}`,
       "",
       toRawMarkdown(project),
@@ -116,7 +124,7 @@ export function getLlmsFullText() {
 }
 
 function getCollectionMarkdown(kind: "blog" | "projects") {
-  const posts = getAllPosts(kind);
+  const posts = getAllPosts(kind).filter((post) => post.published);
   const isProjects = kind === "projects";
   const collectionPath = isProjects ? "projects" : "blog";
   const title = isProjects ? "프로젝트 쇼케이스" : "기술 블로그";
