@@ -12,6 +12,16 @@ coverFit: "contain"
 description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않고 공통 메모리 형식으로 정규화한 과정과, canonical snapshot 기반 fixture·row map·hash 설계를 정리합니다."
 ---
 
+## 이 기능이 필요했던 배경
+
+해당 서비스는 그리팅, 이커머스, 오프라인, 물류센터로 나뉘어 관리되는 재고 정보를 하나의 통합재고로 활용하는 서비스입니다. 각 시스템은 자신에게 필요한 방식으로 데이터를 저장하고 있었기 때문에, 같은 재고를 가리키더라도 컬럼명과 값의 기준이 서로 달랐습니다.
+
+예를 들어 가용 수량 하나만 해도 오프라인은 `available_stock_count`, 이커머스는 `sellable_quantity`, 그리팅은 `saleable_meal_count`, 물류센터는 `physical_available_qty`라는 이름을 사용합니다. 어떤 원천에는 판매 가격이 있지만 물류센터에는 없고, 그리팅에는 식수 단위와 품절 플래그가 있으며, 물류센터에는 판매처에 배정되지 않은 공용 재고가 있습니다.
+
+이 데이터를 원천 테이블별로 그대로 사용하면 통합재고를 조회하거나 동기화할 때마다 “어느 원천인가?”를 먼저 판단해야 합니다. 같은 의미의 값을 읽기 위해 기능마다 서로 다른 컬럼명을 알고 있어야 하고, 원천별 예외를 각 화면·서비스·배치에 반복해서 작성해야 합니다. 그 결과 새로운 원천이 추가되거나 컬럼 기준이 바뀔 때 수정해야 할 범위가 넓어지고, 잘못된 수량이나 가격을 canonical 업무 데이터에 반영할 위험도 커집니다.
+
+그래서 이 작업에서는 네 원천 테이블을 물리적으로 하나로 합치는 대신, 각 원천의 현재 데이터를 우리 서비스가 이해할 수 있는 공통 형식으로 가공하고 정제하는 경계를 만들었습니다. 원천의 계약은 그대로 보존하고, 서비스가 사용하는 상품·SKU·가격·LOT·정책·재고 의미만 `CanonicalInventoryRecord`로 맞춘 뒤 기존 canonical 테이블과 연결합니다.
+
 통합재고 기능을 설계하면서 가장 오래 붙잡은 문장은 “원천 데이터를 하나로 합친다”입니다. 이 표현만 보면 네 개의 원천 테이블을 하나의 거대한 테이블로 `UNION ALL`하는 그림이 먼저 떠오릅니다. 실제 구현은 다른 방향입니다.
 
 네 원천 테이블은 그대로 둔 채, 각 원천의 현재값을 **같은 의미를 가진 메모리 전용 record로 번역한 뒤** 기존 canonical 테이블에 반영합니다. 원천의 차이는 숨기지 않고, 서비스가 읽는 의미만 한 곳에서 맞춥니다.
@@ -22,7 +32,15 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 
 `OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE`의 current 행을 원천별 SQL projection으로 `CanonicalInventoryRecord`에 맞추고, 승인된 `INVENTORY_SOURCE_ROW_MAP`을 기준으로 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 같은 기존 행을 업데이트합니다.
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="1단계 통합 목표">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2f6fcb] text-sm font-bold text-white">01</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#2f6fcb]">1단계 · 통합 목표</p>
+      <p className="text-sm text-foreground/60">서로 다른 원천을 같은 기준으로 연결합니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/integrated-inventory-source-to-canonical-light.svg"
@@ -32,6 +50,7 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
   </div>
   <figcaption>원천 테이블은 그대로 보존하고, 공통 번역기와 검증·매핑을 거쳐 canonical 업무 테이블에 연결합니다.</figcaption>
 </figure>
+</div>
 
 ## 문제는 컬럼명이 아니라 책임의 경계였습니다
 
@@ -72,7 +91,15 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
                 └─ INVENTORY_BALANCE
 ```
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="2단계 데이터 계층 분리">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3fa77e] text-sm font-bold text-white">02</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#3a916e]">2단계 · 데이터 계층</p>
+      <p className="text-sm text-foreground/60">현재값, 연결 정보, 업무 데이터를 섞지 않습니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-source-layers-light.svg"
@@ -82,6 +109,7 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
   </div>
   <figcaption>현재값·연결 정보·공통 record·canonical 업무 데이터·실행 메타데이터를 서로 다른 계층으로 나눕니다.</figcaption>
 </figure>
+</div>
 
 `INVENTORY_SYNC_RUN` 같은 실행 제어 테이블은 이 흐름에 포함되지만 재고 자체가 아닙니다. 실행 상태와 오류를 저장하는 운영 메타데이터입니다. 이런 데이터를 업무 테이블과 섞지 않아야 “현재 재고”와 “동기화가 실패했는가”를 서로 다른 질문으로 다룰 수 있습니다.
 
@@ -157,7 +185,15 @@ public record CanonicalInventoryRecord(
 
 여기서 `adapter`는 모든 변환을 다시 수행하는 거대한 클래스가 아닙니다. 현재 구현의 `InventorySourceAdapter`는 record의 `sourceType`이 자신이 담당하는 원천과 맞는지 확인하고 `InventorySyncAttemptBuffer`에 넣는 계약에 가깝습니다. 필드 변환은 SQL projection, 의미 검증은 typed record가 맡습니다.
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="3단계 필드 표준화">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e7891f] text-sm font-bold text-white">03</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#b46b16]">3단계 · 필드 표준화</p>
+      <p className="text-sm text-foreground/60">원천 컬럼명을 서비스가 이해하는 공통 필드로 번역합니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-source-projection-light.svg"
@@ -167,6 +203,7 @@ public record CanonicalInventoryRecord(
   </div>
   <figcaption>원천별 필드 변환은 SQL projection이 담당하고, record 생성자는 공통 의미의 최소 조건을 검사합니다.</figcaption>
 </figure>
+</div>
 
 ## 원천 키와 canonical PK를 자동 추측하지 않았습니다
 
@@ -186,7 +223,15 @@ source_type + source_record_key
   └─ inventory_policy_id
 ```
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="4단계 승인 매핑">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3575c5] text-sm font-bold text-white">04</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#3575c5]">4단계 · 승인 매핑</p>
+      <p className="text-sm text-foreground/60">원천 키를 기존 canonical PK와 명시적으로 연결합니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-row-map-bridge-light.svg"
@@ -196,6 +241,7 @@ source_type + source_record_key
   </div>
   <figcaption>원천 키와 canonical PK를 직접 비교하지 않고, 승인된 row map을 통해서만 publish 대상을 찾습니다.</figcaption>
 </figure>
+</div>
 
 현재 초기 매핑은 `INITIAL_EXACT`와 `MAPPED` 상태를 사용합니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
 
@@ -224,7 +270,15 @@ generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `can
 
 이 규칙은 같은 balance를 채널 원천과 물류센터 원천에 동시에 복제하지 않게 합니다. 현재 승인 fixture 기준으로 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 합계 `33,358`행이며 row map도 `33,358`건입니다.
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="5단계 초기 fixture 생성">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#7d63c4] text-sm font-bold text-white">05</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#7054b9]">5단계 · 초기 fixture</p>
+      <p className="text-sm text-foreground/60">승인된 canonical snapshot에서 원천 입력을 만듭니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-source-lifecycle-light.svg"
@@ -234,6 +288,7 @@ generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `can
   </div>
   <figcaption>초기 fixture는 운영 sync의 입력을 만드는 별도 경로입니다. 생성 결과에는 source current, row map, manifest가 함께 남습니다.</figcaption>
 </figure>
+</div>
 
 generator는 원천별 serializer로 같은 값을 다른 컬럼명으로 표현합니다.
 
@@ -247,7 +302,15 @@ canonical on_hand_qty = 10
 
 생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. 같은 입력을 다시 넣어도 같은 결과가 나오는지 `--verify`로 확인합니다.
 
-<figure className="not-prose">
+<div className="not-prose my-10">
+  <div className="mb-4 flex items-center gap-3" aria-label="6단계 변경 검증">
+    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#5b6f8e] text-sm font-bold text-white">06</span>
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#536780]">6단계 · 변경 검증</p>
+      <p className="text-sm text-foreground/60">바뀐 행만 반영하고 첫 동기화 기준선을 확인합니다.</p>
+    </div>
+  </div>
+  <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-hash-noop-light.svg"
@@ -257,6 +320,7 @@ canonical on_hand_qty = 10
   </div>
   <figcaption>hash 비교는 변경 후보를 줄이는 단계이며, 실제 canonical 반영은 target별 비교와 transaction 안에서 수행합니다.</figcaption>
 </figure>
+</div>
 
 ## 왜 `MERGE`와 no-op 기준선을 사용했는가
 

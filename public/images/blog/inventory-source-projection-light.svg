@@ -1,19 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 720" role="img" aria-labelledby="title desc">
-  <title id="title">원천별 컬럼을 공통 의미로 바꾸는 과정</title>
-  <desc id="desc">네 원천의 서로 다른 수량 컬럼을 공통 번역기가 on_hand_qty로 바꾸고, 검증과 매핑을 거쳐 기존 canonical 테이블에 전달하는 흐름</desc>
-  <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#7894b7"/></marker><style>.title{font:800 36px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}.subtitle{font:500 21px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#61728c}.label{font:800 25px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}.body{font:500 18px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#536780}.mono{font:600 16px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#60738e}.line{stroke:#7894b7;stroke-width:3;fill:none;marker-end:url(#arrow)}</style></defs>
-  <rect width="1600" height="720" fill="#fbfcff"/><rect x="28" y="28" width="1544" height="664" rx="32" fill="#fff" stroke="#dce6f3" stroke-width="2"/>
-  <text x="72" y="82" class="title">컬럼명은 달라도, 의미는 같은 언어로 맞춥니다</text><text x="74" y="116" class="subtitle">SQL projection은 번역을 담당하고, typed record는 잘못된 값을 막습니다.</text>
-  <text x="76" y="167" class="body">서로 다른 원천</text>
-  <rect x="74" y="190" width="360" height="78" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/><text x="108" y="225" class="label">오프라인 재고</text><text x="108" y="251" class="mono">available_stock_count</text>
-  <rect x="74" y="282" width="360" height="78" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/><text x="108" y="317" class="label">이커머스 재고</text><text x="108" y="343" class="mono">sellable_quantity</text>
-  <rect x="74" y="374" width="360" height="78" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/><text x="108" y="409" class="label">그리팅 재고</text><text x="108" y="435" class="mono">saleable_meal_count</text>
-  <rect x="74" y="466" width="360" height="78" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/><text x="108" y="501" class="label">물류센터 재고</text><text x="108" y="527" class="mono">physical_available_qty</text>
-  <path d="M434 229C498 229 498 312 564 312M434 321H564M434 413C498 413 498 330 564 330M434 505C498 505 498 348 564 348" class="line"/>
-  <rect x="568" y="212" width="370" height="270" rx="22" fill="#fff4e3" stroke="#f0b465" stroke-width="2.5"/><rect x="604" y="250" width="70" height="70" rx="18" fill="#e7891f"/><path d="M623 269h32M623 285h32M623 301h32" stroke="#fff" stroke-width="7" stroke-linecap="round"/><text x="700" y="270" class="label">공통 번역기</text><text x="700" y="305" class="body">SQL projection</text><text x="700" y="334" class="body">+ typed validation</text><text x="604" y="390" class="mono" style="fill:#af6a16">가용 수량 → on_hand_qty</text><text x="604" y="423" class="body">날짜·품절·가격도 같은 형식으로</text><text x="604" y="450" class="body">표현합니다.</text>
-  <path d="M938 347H1018" class="line"/>
-  <rect x="1022" y="212" width="290" height="270" rx="22" fill="#eaf2ff" stroke="#9dbdec" stroke-width="2.5"/><circle cx="1071" cy="270" r="29" fill="#3575c5"/><path d="M1055 270h32M1071 254v32" stroke="#fff" stroke-width="7" stroke-linecap="round"/><text x="1112" y="278" class="label">검증·매핑</text><text x="1060" y="336" class="body">필수 ID 검사</text><text x="1060" y="367" class="body">음수 수량 차단</text><text x="1060" y="398" class="body">row map 연결</text><text x="1060" y="438" class="mono">실패하면 publish 중단</text>
-  <path d="M1312 347H1380" class="line"/>
-  <rect x="1384" y="216" width="144" height="66" rx="15" fill="#f2edff" stroke="#c8baf5" stroke-width="2"/><text x="1407" y="257" class="label" style="font-size:20px">상품 · SKU</text><rect x="1384" y="300" width="144" height="66" rx="15" fill="#f2edff" stroke="#c8baf5" stroke-width="2"/><text x="1407" y="341" class="label" style="font-size:20px">LOT · 정책</text><rect x="1384" y="384" width="144" height="66" rx="15" fill="#f2edff" stroke="#c8baf5" stroke-width="2"/><text x="1400" y="425" class="label" style="font-size:20px">재고 · 위험</text><text x="1384" y="485" class="body" style="font-size:16px">기존 canonical 테이블</text>
-  <rect x="74" y="612" width="1454" height="25" rx="12" fill="#f0f4fa"/><text x="800" y="631" text-anchor="middle" class="body">같은 의미를 만드는 지점과 실제 필드 변환 지점을 분리하면 adapter가 과도하게 커지지 않습니다.</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 780" role="img" aria-labelledby="title desc">
+  <title id="title">원천 컬럼을 공통 필드로 번역하는 매핑표</title>
+  <desc id="desc">오프라인, 이커머스, 그리팅, 물류센터의 서로 다른 가용 수량 컬럼을 on_hand_qty라는 공통 필드로 맞추고 typed record가 검증하는 과정</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#7894b7"/></marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#90a4c0" flood-opacity=".16"/></filter>
+    <style>
+      .title{font:800 36px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}
+      .subtitle{font:500 21px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#61728c}
+      .head{font:800 19px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#425572}
+      .label{font:800 22px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}
+      .body{font:500 18px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#536780}
+      .mono{font:600 17px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#60738e}
+      .line{stroke:#7894b7;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+
+  <rect width="1600" height="780" fill="#fbfcff"/>
+  <rect x="28" y="28" width="1544" height="724" rx="32" fill="#fff" stroke="#dce6f3" stroke-width="2"/>
+  <text x="72" y="82" class="title">컬럼이 달라도, 공통 필드로 번역합니다</text>
+  <text x="74" y="116" class="subtitle">이번 단계의 핵심은 흐름보다 ‘어떤 값이 어떤 의미로 바뀌는가’를 확인하는 일입니다.</text>
+
+  <rect x="74" y="158" width="1072" height="54" rx="14" fill="#f0f4fa"/>
+  <text x="112" y="193" class="head">원천</text>
+  <text x="386" y="193" class="head">원천 컬럼</text>
+  <text x="744" y="193" class="head">공통 의미</text>
+  <text x="1014" y="193" class="head">변환 규칙</text>
+
+  <rect x="74" y="226" width="1072" height="82" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/>
+  <circle cx="112" cy="267" r="14" fill="#3fa77e"/>
+  <text x="144" y="274" class="label">오프라인</text>
+  <text x="386" y="274" class="mono">available_stock_count</text>
+  <path d="M644 267H720" class="line"/>
+  <text x="744" y="274" class="mono">on_hand_qty</text>
+  <text x="1014" y="274" class="body">이름만 변경</text>
+
+  <rect x="74" y="322" width="1072" height="82" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/>
+  <circle cx="112" cy="363" r="14" fill="#3fa77e"/>
+  <text x="144" y="370" class="label">이커머스</text>
+  <text x="386" y="370" class="mono">sellable_quantity</text>
+  <path d="M644 363H720" class="line"/>
+  <text x="744" y="370" class="mono">on_hand_qty</text>
+  <text x="1014" y="370" class="body">판매 가능 수량</text>
+
+  <rect x="74" y="418" width="1072" height="82" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/>
+  <circle cx="112" cy="459" r="14" fill="#3fa77e"/>
+  <text x="144" y="466" class="label">그리팅</text>
+  <text x="386" y="466" class="mono">saleable_meal_count</text>
+  <path d="M644 459H720" class="line"/>
+  <text x="744" y="466" class="mono">on_hand_qty</text>
+  <text x="1014" y="466" class="body">식수 단위 → 수량</text>
+
+  <rect x="74" y="514" width="1072" height="82" rx="16" fill="#e9f7f1" stroke="#9dd9bd" stroke-width="2"/>
+  <circle cx="112" cy="555" r="14" fill="#3fa77e"/>
+  <text x="144" y="562" class="label">물류센터</text>
+  <text x="386" y="562" class="mono">physical_available_qty</text>
+  <path d="M644 555H720" class="line"/>
+  <text x="744" y="562" class="mono">on_hand_qty</text>
+  <text x="1014" y="562" class="body">공용 물리 수량</text>
+
+  <rect x="1180" y="226" width="306" height="370" rx="22" fill="#fff4e3" stroke="#f0b465" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="1216" y="260" width="64" height="64" rx="16" fill="#e7891f"/>
+  <path d="M1234 278h28M1234 294h28M1234 310h28" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <text x="1300" y="288" class="label">공통 record</text>
+  <text x="1216" y="370" class="mono">on_hand_qty</text>
+  <text x="1216" y="405" class="mono">reserved_qty</text>
+  <text x="1216" y="440" class="mono">expiry_date</text>
+  <text x="1216" y="475" class="mono">sale_available_yn</text>
+  <path d="M1146 410H1172" class="line"/>
+  <rect x="1216" y="514" width="234" height="46" rx="12" fill="#fff" stroke="#f0c98f" stroke-width="1.5"/>
+  <text x="1237" y="544" class="body">typed validation</text>
+
+  <rect x="74" y="638" width="1412" height="70" rx="18" fill="#eaf2ff" stroke="#9dbdec" stroke-width="2"/>
+  <text x="110" y="681" class="label">필드 변환</text>
+  <text x="274" y="681" class="body">SQL projection이 컬럼과 타입을 맞추고, record 생성자가 ID·수량·날짜의 최소 조건을 검사합니다.</text>
 </svg>
