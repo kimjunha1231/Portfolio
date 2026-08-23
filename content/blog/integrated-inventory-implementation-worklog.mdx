@@ -9,10 +9,8 @@ tags: ["통합재고", "Oracle", "Spring Boot", "Spring Batch", "MyBatis", "Reac
 cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
 coverAlt: "네 원천 재고가 공통 record와 검증 경계를 거쳐 canonical 업무 데이터와 위험 평가로 이어지는 밝은 기술 도식"
 coverFit: "contain"
-description: "통합재고 조회 기능을 만들며 실제 코드와 버전별 스키마 변경에 적용한 데이터 모델, 동기화 실행, 트랜잭션, 프론트엔드, 위험도 산정과 트레이드오프를 내부 포트폴리오용으로 정리한 작업 기록입니다."
+description: "통합재고 조회 기능을 만들며 적용한 데이터 모델, 동기화 실행, 트랜잭션, 프론트엔드, 위험도 산정과 트레이드오프를 코드와 버전별 스키마 변경 기준으로 정리합니다."
 ---
-
-> 이 문서는 공개 블로그 글이 아니라 작업 내용을 다시 학습하기 위한 내부 기록입니다. 현재 코드와 저장소 문서에서 확인한 사실, 그 사실에서 도출한 설계 판단, 아직 구현하지 않은 후속 설계를 구분해 적습니다.
 
 ## 기록의 기준
 
@@ -168,7 +166,7 @@ balance의 판매처 할당 규칙은 같은 재고를 두 원천에 복제하�
 
 현재 fixture 검증 기준은 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 총 `33,358`행이며 row map도 `33,358`건입니다. 이 수치는 기준 fixture의 결과이지 운영 원천의 영구적인 건수 약속은 아닙니다.
 
-`--verify`는 generator를 다시 실행하는 명령이 아닙니다. baseline 입력 checksum, row count, 생성 파일 checksum, manifest의 파일 목록이 기존 manifest와 일치하는지 검사합니다. 동일 입력으로 재생성한 결과까지 비교하려면 별도의 출력 디렉터리에 다시 생성한 뒤 checksum을 비교해야 합니다.
+생성 단계에서 baseline row count를 검증합니다. 이후 `--verify`는 generator를 다시 실행하지 않고 baseline·입력 checksum, 생성 파일 checksum, manifest의 파일 목록을 확인합니다. 동일 입력으로 재생성한 결과까지 비교하려면 별도의 출력 디렉터리에 다시 생성한 뒤 checksum을 비교해야 합니다.
 
 | 초기 데이터 방식 | 장점 | 단점 | 선택 |
 | --- | --- | --- | --- |
@@ -388,11 +386,11 @@ safetyGap               = max(safety_stock - projectedAvailable(D+7), 0)
 | LOT 유통기한 91~180일 | `NORMAL` |
 | 위 조건이 없고 입력이 유효함 | `GOOD` |
 
-LOT 만료·판매중지·보유일도 위험 사유에 포함됩니다. 여러 조건이 동시에 맞으면 우선순위가 높은 등급을 선택하고, `reason_message`에는 `assessmentStatus`, rule version, rule code, 핵심 이유와 산식을 저장합니다.
+LOT 만료·판매중지는 위험 사유에 포함됩니다. 보유일은 결과 필드로 저장되지만 현재 등급 사유를 직접 만드는 조건은 아닙니다. 여러 조건이 동시에 맞으면 우선순위가 높은 등급을 선택하고, `reason_message`에는 `assessmentStatus`, rule version, rule code, 핵심 이유와 산식을 저장합니다.
 
 ### 8.3 누락 데이터는 안전으로 보정하지 않습니다
 
-예측·현재 수량·안전재고·LOT 중 필수 입력이 없거나 음수이면 `UNASSESSED` 또는 `STALE` 상태로 반환합니다. 이 경우 “위험이 없다”는 뜻인 `SAFE`/`GOOD`으로 fallback하지 않습니다.
+가용 수량·예측·안전재고 정책이 없거나 유효하지 않으면 `UNASSESSED` 또는 `STALE` 상태로 반환합니다. LOT는 존재할 경우 수량·날짜·판매중지 조건을 검증하고 평가에 반영하며, LOT가 없다는 이유만으로 평가를 중단하지 않습니다. 누락 상태를 “위험이 없다”는 뜻인 `SAFE`/`GOOD`으로 fallback하지 않습니다.
 
 DB의 `risk_grade` 제약은 `CRITICAL`, `WARNING`, `NORMAL`, `GOOD`만 허용합니다. 따라서 `InventorySyncRiskWriter`는 저장 시 DB grade 제약을 만족하는 값을 기록하되, 실제 평가 상태와 이유는 `reason_message`에 포함합니다. API mapping은 `CRITICAL→DANGER`, `WARNING→CAUTION`, `NORMAL→NORMAL`, `GOOD→SAFE`입니다.
 
@@ -521,4 +519,4 @@ npm run build
 8. 화면은 URL 상태·TanStack Query·active polling으로 서버 상태를 관찰합니다.
 9. dashboard/statistics durable task·SSE·ETag·자동 recovery는 현재 코드가 아닌 후속 설계입니다.
 
-이 구분을 지키면 공개 기술 글에서는 적용된 기능만 설명하고, 내부 포트폴리오 기록에서는 선택하지 않은 대안과 다음 설계까지 분리해 이어갈 수 있습니다.
+이 구분을 지키면 적용된 기능, 선택하지 않은 대안, 다음 스키마 변경 후보를 서로 섞지 않고 기록할 수 있습니다.

@@ -12,7 +12,7 @@ coverFit: "contain"
 description: "재고 동기화 버튼을 누른 뒤 브라우저 캐시, Spring Boot API, Oracle 비관적 락·DB guard, Spring Batch와 독립 스냅샷이 어떤 순서로 동작하는지 구현 경계와 트레이드오프로 정리합니다."
 ---
 
-통합재고 동기화에서 가장 중요한 것은 버튼을 눌렀을 때 화면의 버튼이 잠기는 일이 아닙니다. 여러 사용자가 동시에 눌러도 같은 재고를 두 번 처리하지 않고, 서버가 중간에 재시작되어도 작업을 잃지 않으며, 대시보드와 통계가 어떤 동기화 결과를 보고 있는지 설명할 수 있어야 합니다.
+통합재고 동기화의 핵심은 화면 버튼이 아니라 실행권·멱등성·publish transaction의 경계입니다. 현재 core 동기화는 중복 실행과 stale worker를 제어하고, 대시보드·통계 snapshot은 in-memory best-effort라는 별도 lifecycle을 가집니다. durable task와 generation을 도입하면 서버 재시작 이후 snapshot 복구와 결과 세대 추적까지 확장할 수 있습니다.
 
 이번 글에서는 한 번의 동기화 요청을 **브라우저 → Spring Boot API → Oracle → Spring Batch → 대시보드·통계 스냅샷 → 브라우저 캐시** 순서로 분해하고, 각 경계의 책임과 선택 이유를 정리합니다.
 
@@ -153,7 +153,7 @@ queryClient.invalidateQueries({
 
 ### 고정 polling 대신 active-only adaptive polling을 사용합니다
 
-동기화가 실행 중일 때만 상태 API를 확인합니다. `QUEUED`는 작업이 시작되기를 기다리는 구간이므로 3초, `RUNNING`은 작업 진행 중이므로 10초처럼 간격을 늘리고, `SUCCEEDED`·`FAILED`·`CANCELLED`에 도달하면 polling을 멈춥니다.
+동기화가 실행 중일 때만 상태 API를 확인합니다. `QUEUED`는 3초, `RUNNING`은 10초 간격으로 조회하며, `SUCCEEDED`, `FAILED`, `SOURCE_CHANGED`, `LAUNCH_FAILED` 같은 terminal 상태에서는 polling을 멈춥니다. `INTERRUPTED`는 recovery 대상이므로 일반 active polling 대상과 구분합니다.
 
 ```js
 const POLL_INTERVAL_BY_STATUS_MS = {
@@ -171,7 +171,7 @@ const refetchInterval = (query) => {
 
 ## 2단계. 브라우저에서 시작 API를 호출합니다
 
-버튼을 누르면 브라우저는 `clientRequestId`를 하나 만듭니다. 이것은 “이번 클릭 요청의 영수증 번호”입니다.
+버튼을 누르면 브라우저는 이번 제출을 식별하는 `clientRequestId`를 생성합니다. 서버는 이 값을 unique guard와 재전송 멱등성 확인에 사용합니다.
 
 ```json
 {
@@ -205,7 +205,7 @@ Oracle의 `SELECT ... FOR UPDATE`는 선택한 행을 잠그고 트랜잭션이 
 ```sql
 SELECT 1
 FROM inventory_sync_mutex
-WHERE mutex_key = 'INVENTORY_CANONICAL'
+WHERE mutex_id = 1
 FOR UPDATE;
 ```
 
@@ -283,7 +283,7 @@ worker가 원천의 시작 version을 읽은 뒤 처리 중에 version이 바뀌
 
 ## 5단계. canonical 재고와 위험등급을 publish합니다
 
-페이지에서 읽은 행은 typed `CanonicalInventoryRecord`로 변환되고 필수 ID, 수량 범위, 원천 타입, 매핑 상태를 검증합니다. 검증에 통과한 record만 `InventorySyncAttemptBuffer`에 담습니다.
+페이지 조회 SQL은 `mapping_status = 'MAPPED'`인 row map만 선택합니다. 그 결과를 typed `CanonicalInventoryRecord`로 변환하면서 필수 ID, 수량 범위, 원천 타입을 검증하고, 통과한 record만 `InventorySyncAttemptBuffer`에 담습니다.
 
 core publish 트랜잭션에서는 다음 결과를 함께 확정합니다.
 
@@ -403,12 +403,12 @@ SSE는 화면을 빠르게 반응시키는 알림 채널이지, 실행권·락·
 | 대량 목록 조회 | server pagination + query cache | 모든 행을 한 번에 조회 | 응답과 브라우저 메모리를 제한합니다. |
 | 화면 상태 확인 | active-only adaptive polling | 3초 고정 polling | 현재는 활성 상태에서만 조회하고, ETag는 후속 개선으로 남겼습니다. |
 | 빠른 완료 알림 | 선택적 SSE | SSE만으로 상태 보장 | 알림 유실을 GET/polling으로 보정할 수 있습니다. |
-| 스냅샷 실패 격리 | DB task 2개 + 독립 retry | 하나의 거대한 트랜잭션 | 대시보드 성공을 통계 실패가 롤백하지 않습니다. |
+| 스냅샷 실패 격리 | 두 개의 in-memory executor | 하나의 거대한 트랜잭션 | 현재 core publish와 집계 실패를 분리합니다. DB task·독립 retry는 후속 설계입니다. |
 | 메시지 브로커 | 현재는 도입하지 않음 | Kafka/RabbitMQ | 현재 작업 빈도에 비해 운영 복잡도가 더 큽니다. |
 
 인덱스와 파티션도 같은 원칙으로 적용합니다. `source_record_key`, `(source_type, mapping_status)`, 실행 상태와 만료 시각 같은 실제 필터·정렬 조건에 인덱스를 두고, Oracle 실행 계획과 p95 지표로 확인한 뒤 추가합니다. 데이터가 충분히 크고 보관 기간·날짜 범위가 명확해졌을 때만 파티션을 검토합니다. “DB 성능을 위해 인덱스와 파티션을 모두 넣는다”는 식으로 먼저 결정하지 않습니다.
 
-## 처음부터 끝까지 순서대로 다시 보기
+## End-to-end 실행 시나리오
 
 아래 순서는 현재 구현과 후속 목표를 구분해 기록한 end-to-end 시나리오입니다.
 
@@ -467,7 +467,7 @@ SLO(Service Level Objective)는 “서비스가 어느 정도 수준으로 동�
 
 즉, 이 글은 “지금 모두 구현되었다”는 보고서가 아니라, 현재 적용된 부분과 다음 스키마 변경 후 도달할 목표를 분리한 설계 기록입니다. 다음 버전 스키마를 임의로 만들거나 실행하지 않는 것도 중요한 운영 원칙입니다.
 
-## 자주 헷갈렸던 질문
+## 운영 판단 Q&A
 
 ### polling이 없으면 다른 사용자가 누르는 것을 막을 수 없나요?
 
@@ -501,7 +501,7 @@ SLO(Service Level Objective)는 “서비스가 어느 정도 수준으로 동�
 - **SSE**는 있으면 빠른 알림을 제공하지만, polling·GET 재검증을 대신하는 락이나 저장소로 사용하지 않습니다.
 - **Kafka와 RabbitMQ**는 현재 저빈도 workflow에 필수로 넣지 않고, 독립적인 소비자·backlog·이벤트 재생 요구가 생길 때 도입합니다.
 
-결국 사용자가 보는 것은 하나의 버튼이지만, 서버가 지켜야 하는 것은 `한 번만 실행`, `변경된 데이터만 반영`, `실패해도 복구`, `스냅샷 시점 설명 가능`이라는 네 가지 약속입니다. 이 약속을 Frontend·Backend·DB·Batch의 각 책임으로 나누면 데이터가 지금보다 훨씬 많아져도 어느 지점부터 확장해야 하는지 판단할 수 있습니다.
+결국 사용자가 보는 것은 하나의 버튼이지만, 현재 서버가 보장하는 범위는 `한 번만 실행`, `변경된 데이터만 반영`, `publish transaction의 일관성`입니다. snapshot의 durable 복구와 결과 세대 추적은 후속 설계 범위로 남겼습니다. Frontend·Backend·DB·Batch의 책임을 분리했기 때문에 확장 시 변경 지점을 구분할 수 있습니다.
 
 ## 이어서 읽기
 

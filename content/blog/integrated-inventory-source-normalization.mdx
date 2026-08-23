@@ -7,7 +7,7 @@ section: "개발 기록"
 category: "Data Architecture / Inventory"
 tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Fixture", "ETL"]
 cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
-coverAlt: "밝은 배경에서 오프라인, 이커머스, 그리팅, 물류센터 재고가 공통 번역기와 검증·매핑을 거쳐 canonical 테이블로 연결되는 설명 도식"
+coverAlt: "밝은 배경에서 오프라인, 이커머스, 그리팅, 물류센터 재고가 공통 projection과 검증·매핑 경계를 거쳐 canonical 테이블로 연결되는 설명 도식"
 coverFit: "contain"
 description: "오프라인·이커머스·그리팅·물류센터의 서로 다른 재고를 하나의 서비스 기준으로 번역한 과정을 설명합니다. 원천 테이블을 유지한 이유부터 매핑·변경 감지·초기 데이터 생성의 선택과 트레이드오프까지 정리합니다."
 ---
@@ -28,7 +28,7 @@ description: "오프라인·이커머스·그리팅·물류센터의 서로 다�
 
 이 글에서는 통합재고 전체 기능이 아니라 원천 4종을 하나의 정식 데이터 모델로 연결하는 설계 과정만 다룹니다. 동기화 실행 버튼, 위험 재평가, 화면 조회 흐름은 다음 기록에서 이어서 정리할 예정입니다.
 
-## 한 문장으로 요약하면
+## 원천 정규화의 핵심
 
 `OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE`의 current 행을 원천별 SQL projection으로 `CanonicalInventoryRecord`에 맞추고, 검증된 `MAPPED` 상태의 `INVENTORY_SOURCE_ROW_MAP`을 기준으로 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 같은 기존 행을 업데이트합니다.
 
@@ -70,11 +70,11 @@ description: "오프라인·이커머스·그리팅·물류센터의 서로 다�
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/integrated-inventory-source-to-canonical-ai.png"
-      alt="네 가지 원천 재고가 공통 번역기와 검증·매핑을 거쳐 PRODUCT, SKU, 가격, LOT, 정책, 재고 테이블로 연결되는 밝은 설명 도식"
+      alt="네 가지 원천 재고가 공통 projection과 검증·매핑 경계를 거쳐 PRODUCT, SKU, 가격, LOT, 정책, 재고 테이블로 연결되는 밝은 설명 도식"
       className="h-auto w-full object-contain"
     />
   </div>
-  <figcaption>원천 테이블은 그대로 보존하고, 공통 번역기와 검증·매핑을 거쳐 canonical 업무 테이블에 연결합니다.</figcaption>
+  <figcaption>원천 테이블은 그대로 보존하고, 공통 projection과 검증·매핑 경계를 거쳐 canonical 업무 테이블에 연결합니다.</figcaption>
 </figure>
 </div>
 
@@ -153,7 +153,7 @@ description: "오프라인·이커머스·그리팅·물류센터의 서로 다�
 
 ## 설계 3. 스키마 변경 이력과 ERD로 구현 범위를 확인했습니다
 
-DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보이고, 버전별 SQL만 보면 통합재고와 관계없는 전략·예측 테이블까지 한꺼번에 들어옵니다. 두 자료는 서로 다른 질문에 답합니다. **ERD는 테이블 사이의 관계를 보여주는 지도**이고, **버전별 SQL은 데이터베이스 구조가 어떤 순서로 만들어졌는지 기록하는 변경 이력**입니다. 따라서 ERD에 없는 변경 이력의 테이블이 있다고 해서 곧바로 누락이라고 판단하지 않습니다. 다른 기능의 테이블이거나, ERD 스냅샷을 만든 시점 이후에 추가된 구조일 수 있습니다.
+DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보이고, 버전별 SQL만 보면 통합재고와 관계없는 전략·예측 테이블까지 한꺼번에 들어옵니다. 두 자료는 서로 다른 질문에 답합니다. **ERD는 테이블 사이의 관계를 표현하고**, **버전별 SQL은 데이터베이스 구조가 어떤 순서로 만들어졌는지 기록합니다**. 따라서 ERD에 없는 변경 이력의 테이블이 있다고 해서 곧바로 누락이라고 판단하지 않습니다. 다른 기능의 테이블이거나, ERD 스냅샷을 만든 시점 이후에 추가된 구조일 수 있습니다.
 
 버전 migration은 `V21__...sql`, `V22__...sql`처럼 버전이 붙은 SQL 파일입니다. 배포할 때 파일 순서대로 DB 구조를 바꾸므로, 이미 적용한 파일을 나중에 고치는 대신 다음 버전의 파일을 추가하는 방식으로 변경 이력을 보존합니다.
 
@@ -277,7 +277,7 @@ canonical on_hand_qty = 10
   → WAREHOUSE.physical_available_qty = 10
 ```
 
-생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. `--verify`는 generator를 다시 실행하는 명령이 아니라, baseline 입력과 기존 산출물의 checksum·row count가 manifest와 일치하는지 확인하는 명령입니다. 같은 입력으로 다시 생성한 결과까지 비교하려면 별도의 임시 출력 디렉터리에서 재생성한 뒤 checksum을 비교해야 합니다.
+생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. 생성 단계에서 baseline row count를 검증하고, `--verify`는 generator를 다시 실행하지 않은 채 manifest와 입력·출력 checksum 및 generated file 목록을 확인합니다. 같은 입력으로 다시 생성한 결과까지 비교하려면 별도의 임시 출력 디렉터리에서 재생성한 뒤 checksum을 비교해야 합니다.
 
 초기 데이터를 만드는 방법도 세 가지를 비교했습니다.
 
@@ -607,9 +607,9 @@ Buffer -> Target: changed record만 publish transaction에서 반영
 
 참고로 `202 Accepted`는 “요청을 받았고 처리할 작업으로 등록했다”는 응답입니다. 작업이 그 순간 모두 끝났다는 뜻은 아니므로, 다음 글에서는 실행 상태를 조회해 실제 성공 여부를 확인하는 과정까지 연결해 설명하겠습니다.
 
-## 기술·개념 용어집
+## 핵심 용어와 책임
 
-본문을 다시 볼 때 필요한 용어만 짧게 정리했습니다. 용어를 외우기보다 “어느 단계의 문제를 해결하는가”를 함께 보시면 됩니다.
+구현에서 반복되는 용어와 해당 책임을 정리합니다.
 
 | 용어 | 간단한 설명 | 이 기능에서의 역할 |
 | --- | --- | --- |
