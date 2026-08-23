@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 800" role="img" aria-labelledby="title desc">
+  <title id="title">통합재고 데이터 계층</title>
+  <desc id="desc">승인 기준선, 원천 current, 연결 지도, 공통 메모리, canonical 업무 테이블을 아래로 쌓고 실행 메타데이터를 별도로 둔 구조</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#7894b7"/></marker>
+    <style>
+      .title{font:800 36px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}.subtitle{font:500 21px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#61728c}.label{font:800 24px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#1b2b45}.body{font:500 18px -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:#536780}.mono{font:600 16px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#60738e}.card{stroke-width:2.2}.line{stroke:#7894b7;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="800" fill="#fbfcff"/><rect x="28" y="28" width="1544" height="744" rx="32" fill="#fff" stroke="#dce6f3" stroke-width="2"/>
+  <text x="72" y="82" class="title">데이터를 섞지 않고, 계층별로 나눕니다</text><text x="74" y="116" class="subtitle">각 데이터가 언제 만들어지고, 누구의 책임인지 한눈에 구분합니다.</text>
+  <rect x="78" y="156" width="870" height="90" rx="18" class="card" fill="#eaf2ff" stroke="#9dbdec"/><text x="110" y="197" class="label">1 · 승인 기준선</text><text x="110" y="226" class="mono">canonical snapshot 6종 · baseline_manifest.json</text><path d="M512 246V268" class="line"/>
+  <rect x="78" y="270" width="870" height="90" rx="18" class="card" fill="#e9f7f1" stroke="#9dd9bd"/><text x="110" y="311" class="label">2 · 원천 current 4종</text><text x="110" y="340" class="body">오프라인 · 이커머스 · 그리팅 · 물류센터</text><path d="M512 360V382" class="line"/>
+  <rect x="78" y="384" width="870" height="90" rx="18" class="card" fill="#f2edff" stroke="#c8baf5"/><text x="110" y="425" class="label">3 · 연결 지도</text><text x="110" y="454" class="mono">source_record_key → canonical PK 묶음</text><path d="M512 474V496" class="line"/>
+  <rect x="78" y="498" width="870" height="90" rx="18" class="card" fill="#fff4e3" stroke="#f0b465"/><text x="110" y="539" class="label">4 · 공통 메모리 형식</text><text x="110" y="568" class="mono">SQL projection → CanonicalInventoryRecord → 검증</text><path d="M512 588V610" class="line"/>
+  <rect x="78" y="612" width="870" height="90" rx="18" class="card" fill="#f2edff" stroke="#c8baf5"/><text x="110" y="653" class="label">5 · canonical 업무 테이블</text><text x="110" y="682" class="body">상품 · SKU · 가격 · LOT · 정책 · 재고</text>
+  <rect x="1010" y="270" width="450" height="230" rx="22" fill="#f7f9fd" stroke="#d6e0ed" stroke-width="2"/><text x="1050" y="315" class="label">옆에서 기록하는 데이터</text><text x="1050" y="360" class="mono">INVENTORY_SYNC_RUN</text><text x="1050" y="390" class="mono">INVENTORY_SOURCE_STATE</text><text x="1050" y="420" class="mono">INVENTORY_SYNC_ERROR</text><text x="1050" y="462" class="body">실행·감사·오류 메타데이터</text><path d="M948 428H1000" stroke="#aebdd0" stroke-width="2" stroke-dasharray="8 8"/>
+  <text x="1010" y="575" class="body">현재값과 실행 이력을</text><text x="1010" y="610" class="label">같은 테이블에 섞지 않습니다.</text><text x="1010" y="650" class="body">그래야 재고의 의미와 동기화 상태를</text><text x="1010" y="678" class="body">서로 다른 질문으로 설명할 수 있습니다.</text>
+</svg>
