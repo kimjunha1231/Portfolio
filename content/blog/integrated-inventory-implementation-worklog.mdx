@@ -2,9 +2,9 @@
 title: "통합재고 구현 작업 기록: 원천 정규화부터 조회·동기화·위험도 산정까지"
 date: "2026-08-23"
 lastModified: "2026-08-23"
-published: false
-section: "작업 기록"
-category: "Internal Portfolio / Integrated Inventory"
+published: true
+section: "개발 기록"
+category: "Backend / Data Architecture"
 tags: ["통합재고", "Oracle", "Spring Boot", "Spring Batch", "MyBatis", "React", "TanStack Query", "RiskRuleEngine", "DB 설계"]
 cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
 coverAlt: "네 원천 재고가 공통 record와 검증 경계를 거쳐 canonical 업무 데이터와 위험 평가로 이어지는 밝은 기술 도식"
@@ -64,7 +64,7 @@ description: "통합재고 조회 기능을 만들며 적용한 데이터 모델
 | 통합재고 조회 | YSK-58, `46e3696` | YSK-56, `9489ed7` | 목록·검색·필터·페이지네이션·상세·LOT |
 | 수요예측·재고 상태 | YSK-80, `a9ac335` | YSK-79, `7fb9673` | 예측 응답, 위험 필터·배지, 상세 상태, 접근성 |
 | 원천 동기화·재평가 | YSK-109, `b510342` | YSK-108, `baf1b60` | source current, sync run, 500행 page worker, publish, risk 재평가, 동기화 UI |
-| 내부 보강 | `8d532ee`, `c1b121e`, `83dfd0d`, `0fbbddd`, `231aa95`, `d509179` | `c89ccac`, `079c1c2`, `4f5755d`, `e91396d` 등 | 예측 누락 정책, 미할당 재고, 전략 sync 필드, 상태 표시·접근성 |
+| 후속 보강 | `8d532ee`, `c1b121e`, `83dfd0d`, `0fbbddd`, `231aa95`, `d509179` | `c89ccac`, `079c1c2`, `4f5755d`, `e91396d` 등 | 예측 누락 정책, 미할당 재고, 전략 sync 필드, 상태 표시·접근성 |
 
 커밋 기록을 기능 단위로 다시 읽으면, 이 작업의 핵심은 다음 순서입니다.
 
@@ -271,6 +271,17 @@ Batch job 시작
   → buffer와 fencing token으로 publish 호출
 ```
 
+<figure className="not-prose my-10">
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-sync-control-ai.png"
+      alt="동기화 실행이 네 원천별 처리 현황과 원천 상태, 오류 기록, 정상 반영 결과로 이어지는 운영 메타데이터 도식"
+      className="h-auto w-full object-contain"
+    />
+  </div>
+  <figcaption>실행 기록은 원천별 처리 건수·오류와 정상 반영 여부를 분리해 남깁니다. 중요한 상태 값은 이미지가 아니라 API와 DB 계약으로 확인합니다.</figcaption>
+</figure>
+
 `fencing_token`은 stale worker가 나중에 돌아와 새 attempt의 데이터를 덮어쓰지 못하게 하는 실행 세대 번호입니다. publish 전후와 batch 상태 변경에서 run id·attempt no·fencing token을 함께 확인합니다.
 
 ### 6.3 core publish transaction
@@ -305,7 +316,7 @@ core transaction commit 이후 `InventorySyncSnapshotCoordinator`가 dashboard�
 | LOT | `GET /api/v1/inventories/{skuCode}/sales-points/{salesPointCode}/lots` | LOT별 수량과 날짜를 FEFO 관점으로 보여줍니다. |
 | 동기화 제출 | `POST /api/v1/inventory-sync-runs` | `clientRequestId`를 받아 `QUEUED` run을 생성합니다. |
 | 최근 실행 | `GET /api/v1/inventory-sync-runs/latest` | 현재 active 또는 최근 실행 상태를 반환합니다. |
-| 실행 상세 | `GET /api/v1/inventory-sync-runs/{syncRunId}` | phase·source별 count·오류·fencing 정보를 반환합니다. |
+| 실행 상세 | `GET /api/v1/inventory-sync-runs/{syncRunId}` | phase·attempt·source별 count·오류를 반환합니다. fencing token은 서버 내부 실행 제어 정보로 사용합니다. |
 | 데모 입력 | `POST /api/v1/inventory-source-demo/adjustments` | flag가 켜진 환경에서 source 수량 감소와 audit을 transaction으로 처리합니다. |
 
 BackEnd는 `feature/inventory`의 조회 controller와 `feature/inventorysync`의 제출·worker·publisher·risk writer를 분리합니다. FrontEnd는 `pages/inventory`가 URL·query를 조합하고, `features/inventory-filter`, `features/inventory-sync`, `widgets/inventory-detail-drawer`, `entities/inventory`, `entities/risk`가 화면 책임을 나눕니다. 이 분리는 “조회 화면이 동기화 DB transaction을 직접 알고 있어야 한다”는 결합을 피합니다.
@@ -337,7 +348,7 @@ URL 상태를 선택한 이유는 다음과 같습니다.
 
 ### 7.2 TanStack Query cache와 페이지네이션
 
-목록은 서버 페이지네이션을 사용하고, 검색·위험등급·판매처·페이지·정렬을 query key에 포함합니다. 캐시 key가 달라지므로 서로 다른 필터 결과가 섞이지 않습니다. 동기화가 성공하면 목록·요약·상세·LOT·risk 관련 query만 무효화합니다. dashboard·statistics·forecast snapshot은 각자 갱신 주기를 가지므로 같은 invalidation으로 가정하지 않습니다.
+목록은 서버 페이지네이션을 사용하고, 검색·위험등급·판매처·페이지·정렬을 query key에 포함합니다. 캐시 key가 달라지므로 서로 다른 필터 결과가 섞이지 않습니다. 동기화가 성공하면 목록·요약·상세·LOT·risk·dashboard·statistics query를 stale 상태로 만들고 다시 읽게 합니다. forecast snapshot은 별도 갱신 주기를 가지므로 이 성공 후 무효화 범위와 동일하게 가정하지 않습니다.
 
 실행 상태 query는 현재 active-only adaptive polling입니다.
 
@@ -386,7 +397,7 @@ safetyGap               = max(safety_stock - projectedAvailable(D+7), 0)
 | LOT 유통기한 91~180일 | `NORMAL` |
 | 위 조건이 없고 입력이 유효함 | `GOOD` |
 
-LOT 만료·판매중지는 위험 사유에 포함됩니다. 보유일은 결과 필드로 저장되지만 현재 등급 사유를 직접 만드는 조건은 아닙니다. 여러 조건이 동시에 맞으면 우선순위가 높은 등급을 선택하고, `reason_message`에는 `assessmentStatus`, rule version, rule code, 핵심 이유와 산식을 저장합니다.
+LOT 만료·판매중지는 위험 사유에 포함됩니다. 보유일은 결과 필드로 저장되지만 현재 등급 사유를 직접 만드는 조건은 아닙니다. 여러 조건이 동시에 맞으면 우선순위가 높은 등급을 선택합니다. 입력이 유효해 정상 계산이 가능한 경우 `reason_message`에 `assessmentStatus`, rule version, rule code, 핵심 이유와 산식을 저장하고, 입력 누락 상태에서는 상태·버전·코드·핵심 이유를 저장합니다.
 
 ### 8.3 누락 데이터는 안전으로 보정하지 않습니다
 
@@ -466,9 +477,9 @@ node scripts/generate_inventory_source_current.mjs --verify
 ```
 
 - baseline input checksum이 일치하는지 확인합니다.
-- 네 source current count와 총합을 확인합니다.
-- row map count와 source row count가 일치하는지 확인합니다.
-- generated SQL과 manifest checksum을 확인합니다.
+- manifest에 기록된 네 source current count와 총합을 별도로 확인합니다.
+- manifest에 기록된 row map count와 source row count를 별도로 확인합니다.
+- generated SQL·생성 파일 checksum과 manifest 파일 목록을 확인합니다. `--verify`가 generator를 다시 실행해 row count를 재계산하는 것은 아닙니다.
 
 ### BackEnd
 
@@ -507,7 +518,7 @@ npm run build
 
 이 기능의 핵심 구현은 “네 원천 테이블을 하나로 합쳤다”가 아닙니다. 네 원천 current를 보존하면서 SQL projection으로 공통 의미를 만들고, `ROW_MAP`으로 기존 업무 행을 명시적으로 연결한 뒤, typed record·hash·source version·fencing token·transaction으로 안전하게 publish하는 경계를 만든 것입니다.
 
-작업 결과를 한 줄씩 기억하면 다음과 같습니다.
+구현 경계와 선택한 기준은 다음과 같이 정리됩니다.
 
 1. 원천의 컬럼명과 계약은 원천 current에 남깁니다.
 2. 서비스가 이해할 필드와 타입은 projection과 `CanonicalInventoryRecord`에서 맞춥니다.
@@ -520,3 +531,10 @@ npm run build
 9. dashboard/statistics durable task·SSE·ETag·자동 recovery는 현재 코드가 아닌 후속 설계입니다.
 
 이 구분을 지키면 적용된 기능, 선택하지 않은 대안, 다음 스키마 변경 후보를 서로 섞지 않고 기록할 수 있습니다.
+
+## 이어서 읽기
+
+- [원천 4종을 하나의 통합재고로 연결하기: 공통 메모리 형식과 검증 매핑 설계](/blog/integrated-inventory-source-normalization)
+- [통합재고 동기화는 버튼 하나로 끝나지 않는다: Frontend·Spring Boot·Oracle·Batch 설계](/blog/integrated-inventory-sync-end-to-end-architecture)
+- [Stocks FrontEnd 저장소](https://github.com/kosa11-final-project/FrontEnd)
+- [Stocks BackEnd 저장소](https://github.com/kosa11-final-project/BackEnd)
