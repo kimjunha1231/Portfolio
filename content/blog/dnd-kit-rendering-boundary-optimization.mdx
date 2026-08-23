@@ -197,7 +197,7 @@ DndContext - active·over·요소 위치와 드래그 이벤트를 관리한다.
 
 ### 1. `SortableContext.tsx` 분석
 
-`SortableContext`는 상위의 `DndContext`에서 드래그 상태를 읽고, 이를 정렬에 필요한 인덱스와 요소 위치로 바꿔 하위 카드에 제공한다. 아래 코드는 프로젝트에서 사용한 `@dnd-kit/sortable 10.0.0`의 내부 `SortableContext.tsx` 중 이번 문제와 관련된 흐름만 단순화한 것이다.
+`SortableContext`는 상위의 `DndContext`에서 드래그 상태를 읽고, 이를 정렬에 필요한 인덱스와 요소 위치로 바꿔 하위 카드에 제공한다. 아래 코드는 프로젝트에서 사용한 `dnd-kit`의 내부 `SortableContext.tsx` 중 이번 문제와 관련된 흐름만 단순화한 것이다.
 
 ```tsx
 export function SortableContext({children, items, strategy}: Props) {
@@ -255,7 +255,7 @@ export function useSortable({id}: Arguments) {
 }
 ```
 
-이 코드는 실제로 사용한 `@dnd-kit/sortable 10.0.0`의 [`useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)에서 구독 구조만 단순화한 것이다.
+이 코드는 실제로 사용한 `dnd-kit`의 [`useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)에서 구독 구조만 단순화한 것이다.
 
 프로젝트에서 각 카드를 렌더링하던 `KanbanCard`는 내부의 `useSortable`을 통해 여러 드래그 상태를 직접 구독하고 있었다. `React.memo`는 부모로부터 전달받은 Props가 바뀌지 않았을 때 컴포넌트의 실행을 건너뛰지만, 컴포넌트 내부에서 `useContext`로 구독하는 값의 변경까지 막아주지는 않는다. 따라서 상위 `DndContext`나 `SortableContext`가 제공하는 값이 바뀌면, 이를 구독하는 `KanbanCard`는 Props가 그대로여도 다시 실행된다. 기존 구조에서는 모든 카드가 `useSortable`을 사용하고 있었기 때문에, 드롭 대상이나 정렬 인덱스가 바뀌는 동안 영향을 받지 않은 카드에도 리렌더링이 발생하고 있었다.
 
@@ -434,8 +434,8 @@ return card;
 - [JobSecretary hello-pangea/dnd 적용 후 `KanbanCard.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/44d6259/features/document-kanban/ui/KanbanCard.tsx)
 - [JobSecretary 현재 `kanban-card.tsx`](https://github.com/kimjunha1231/JobSecretary/blob/main/features/document-kanban/ui/kanban-card.tsx)
 - [dnd-kit `useSortable` 공식 문서](https://dndkit.com/legacy/presets/sortable/use-sortable/)
-- [dnd-kit 10.0.0 `SortableContext.tsx`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/components/SortableContext.tsx)
-- [dnd-kit 10.0.0 `useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)
+- [dnd-kit `SortableContext.tsx`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/components/SortableContext.tsx)
+- [dnd-kit `useSortable.ts`](https://github.com/clauderic/dnd-kit/blob/2d862922975e5fa73e1a11845f8c781296f21d4b/packages/sortable/src/hooks/useSortable.ts)
 - [hello-pangea/dnd 공식 저장소와 지원 범위](https://github.com/hello-pangea/dnd)
 - [hello-pangea/dnd `Draggable` 공식 문서](https://github.com/hello-pangea/dnd/blob/main/docs/api/draggable.md)
 - [hello-pangea/dnd `connected-draggable.ts`](https://github.com/hello-pangea/dnd/blob/main/src/view/draggable/connected-draggable.ts)
