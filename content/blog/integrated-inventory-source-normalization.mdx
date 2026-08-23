@@ -5,7 +5,7 @@ lastModified: "2026-08-23"
 published: true
 section: "개발 기록"
 category: "Data Architecture / Inventory"
-tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Fixture", "ETL"]
+tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Flyway", "Fixture", "ETL"]
 cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
 coverAlt: "밝은 배경에서 오프라인, 이커머스, 그리팅, 물류센터 재고가 공통 번역기와 검증·매핑을 거쳐 canonical 테이블로 연결되는 설명 도식"
 coverFit: "contain"
@@ -33,10 +33,9 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 `OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE`의 current 행을 원천별 SQL projection으로 `CanonicalInventoryRecord`에 맞추고, 승인된 `INVENTORY_SOURCE_ROW_MAP`을 기준으로 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 같은 기존 행을 업데이트합니다.
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="1단계 통합 목표">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2f6fcb] text-sm font-bold text-white">01</span>
+  <div className="mb-4" aria-label="통합 목표">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#2f6fcb]">1단계 · 통합 목표</p>
+      <p className="text-sm font-bold tracking-wide text-[#2f6fcb]">통합 목표</p>
       <p className="text-sm text-foreground/60">서로 다른 원천을 같은 기준으로 연결합니다.</p>
     </div>
   </div>
@@ -92,10 +91,9 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 ```
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="2단계 데이터 계층 분리">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3fa77e] text-sm font-bold text-white">02</span>
+  <div className="mb-4" aria-label="데이터 계층">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#3a916e]">2단계 · 데이터 계층</p>
+      <p className="text-sm font-bold tracking-wide text-[#3a916e]">데이터 계층</p>
       <p className="text-sm text-foreground/60">현재값, 연결 정보, 업무 데이터를 섞지 않습니다.</p>
     </div>
   </div>
@@ -113,6 +111,35 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 
 `INVENTORY_SYNC_RUN` 같은 실행 제어 테이블은 이 흐름에 포함되지만 재고 자체가 아닙니다. 실행 상태와 오류를 저장하는 운영 메타데이터입니다. 이런 데이터를 업무 테이블과 섞지 않아야 “현재 재고”와 “동기화가 실패했는가”를 서로 다른 질문으로 다룰 수 있습니다.
 
+## ERD와 Flyway를 함께 보면 범위가 세 겹으로 나뉩니다
+
+DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보이고, Flyway만 보면 통합재고와 관계없는 전략·예측 테이블까지 한꺼번에 들어옵니다. 저장소에 보관된 통합재고 ERD 스냅샷에는 이 기능에 직접 연결되는 22개 엔터티가 있고, Flyway V1~V24에는 서비스 전체 52개 테이블이 있습니다. 따라서 ERD에 없는 Flyway 테이블은 누락이라기보다 다른 기능의 범위입니다.
+
+이번 글에서 다루는 DB 범위는 아래처럼 나뉩니다.
+
+| 영역 | 주요 테이블 | 설계 책임 |
+| --- | --- | --- |
+| 기준 업무 데이터 | `PRODUCT`, `SKU`, `LOT`, `SKU_CHANNEL_PRICE`, `SKU_COST`, `INVENTORY_POLICY`, `INVENTORY_BALANCE` | 통합재고가 최종적으로 사용하는 상품·가격·LOT·정책·수량의 정식 모델입니다. |
+| 원천 current | `INVENTORY_SOURCE_OFFLINE`, `INVENTORY_SOURCE_ECOMMERCE`, `INVENTORY_SOURCE_GREETING`, `INVENTORY_SOURCE_WAREHOUSE` | 네 시스템의 서로 다른 컬럼과 원천별 필수 조건을 그대로 보존합니다. |
+| 연결·검증 | `INVENTORY_SOURCE_ROW_MAP`, `INVENTORY_SOURCE_STATE` | 원천 키를 승인된 기준 PK에 연결하고 버전·checksum 기준을 기록합니다. |
+| 실행 운영 | `INVENTORY_SYNC_MUTEX`, `INVENTORY_SYNC_RUN`, `INVENTORY_SYNC_RUN_SOURCE`, `INVENTORY_SYNC_ERROR` | 중복 실행 방지, 실행 상태, 원천별 통계, 행 단위 오류를 분리합니다. |
+| 연계·보조 | `RISK_ASSESSMENT`, `INVENTORY_DEMO_ADJUSTMENT` | 재고 변경의 위험 평가 lineage와 시연용 원천 차감 이력을 보관합니다. |
+
+<div className="not-prose my-10">
+  <figure>
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-db-scope-ai.png"
+      alt="오프라인, 이커머스, 그리팅, 물류센터 원천 current가 승인 row map을 거쳐 상품, SKU, LOT, 가격, 원가, 정책, 재고 현황으로 연결되고 동기화 운영과 위험 평가가 분리된 DB 설계 범위"
+      className="h-auto w-full object-contain"
+    />
+  </div>
+  <figcaption>전체 ERD를 한 장에 욱여넣기보다 원천·연결·업무·운영 책임을 분리해 읽을 수 있게 구성했습니다.</figcaption>
+</figure>
+</div>
+
+이 범위는 `BackEnd/docs/erd/통합재고조회-흐름배치-한글-snapshot.json`과 `BackEnd/docs/erd/flyway-v24-full-schema-mermaid.md`를 기준으로 확인했습니다. V21~V24가 원천 current, durable sync, risk lineage, demo adjustment를 추가하고, V22에서 `RISK_ASSESSMENT.inventory_sync_run_id`를 연결하며, V24에서 `SCHEDULED` 트리거를 허용합니다. 최신 전체 마이그레이션이 궁금하다면 [ERDCloud 통합재고조회](https://www.erdcloud.com/d/SPGTMr3v6k3tQKME9)와 저장소의 Flyway 카탈로그를 함께 보는 것이 안전합니다.
+
 ## 왜 원천 테이블을 네 개로 유지했는가
 
 원천 current의 한 행은 `특정 원천의 특정 SKU가 특정 위치·LOT에서 현재 어떤 수량과 가격·정책을 가지는가`를 나타냅니다. 상품명과 SKU명이 LOT 행마다 반복되는 넓은 구조지만, 원천 전송 레코드에 가깝다는 목적에는 맞습니다.
@@ -120,6 +147,31 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 오프라인은 지점과 판매 상태가 중요하고, 이커머스는 판매자 옵션과 결제·배송 비용이 필요합니다. 그리팅은 메뉴와 식수 단위를 보존해야 하며, 물류센터는 판매처에 배정되지 않은 공용 재고를 표현해야 합니다. 이 차이를 모두 공통 컬럼으로 만들면 “값이 없음”이 “이 원천에는 해당 개념이 없음”인지 “데이터가 누락됨”인지 구분하기 어려워집니다.
 
 원천별 테이블은 각 계약을 DB 제약과 테스트로 확인할 수 있게 해줍니다. 예를 들어 물류센터 행의 `assigned_sales_point_code`는 현재 `NULL`이어야 합니다. 센터 공용 재고를 판매처 재고로 복제하면 통합재고 합계가 부풀기 때문입니다.
+
+## canonical 업무 테이블은 관계를 보존하도록 나눴습니다
+
+정식 업무 데이터도 하나의 넓은 `CANONICAL_INVENTORY` 테이블로 만들지 않았습니다. 상품의 정체성, SKU의 판매 단위, LOT의 유통기한, 채널별 가격, 원가, 재고 정책, 실제 잔량은 변경 주기와 책임이 다르기 때문입니다. 관계를 분리해두면 원천 컬럼명이 바뀌어도 기존 상품·SKU·LOT의 의미를 다시 정의하지 않아도 됩니다.
+
+| 관계 | 핵심 컬럼 | 이렇게 나눈 이유 |
+| --- | --- | --- |
+| 상품 → SKU → LOT | `PRODUCT.product_id` → `SKU.product_id` → `LOT.sku_id` | 상품, 판매 단위, 유통기한이 있는 물류 단위를 구분합니다. LOT가 바뀌어도 상품·SKU의 식별자는 유지됩니다. |
+| SKU → 가격·원가 | `SKU_CHANNEL_PRICE.sku_id`, `SKU_COST.sku_id` | 판매처별 가격과 기간별 내부 원가를 분리합니다. 채널 가격의 `PRODUCT_COST`와 공통 원가의 `UNIT_COST`를 같은 의미로 덮어쓰지 않습니다. |
+| SKU·센터·판매처 → 정책 | `INVENTORY_POLICY.sku_id`, `warehouse_id`, `stock_sales_point_id` | 안전재고·목표재고·보유비용은 위치와 판매처 조합의 정책입니다. 재고 수량 자체와 섞지 않습니다. |
+| SKU·센터·판매처·LOT → 재고 현황 | `INVENTORY_BALANCE`의 `on_hand_qty`, `reserved_qty`, `total_qty` | 실제 보유량과 예약량을 분리하고 `total_qty`는 Oracle virtual column으로 계산합니다. 예약량을 다시 빼서 중복 차감하지 않습니다. |
+| 재고 현황 → 위험 평가 | `RISK_ASSESSMENT.inventory_balance_id`, `inventory_sync_run_id` | 어떤 재고와 어떤 동기화 실행을 근거로 위험도를 계산했는지 추적합니다. `inventory_sync_run_id`는 V22에서 추가되었습니다. |
+
+<div className="not-prose my-10">
+  <figure>
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-canonical-relations-ai.png"
+      alt="상품에서 SKU와 LOT로 이어지고 SKU의 가격과 원가, 센터와 판매처의 정책이 재고 현황으로 모인 뒤 위험 평가로 이어지는 canonical 업무 데이터 관계"
+      className="h-auto w-full object-contain"
+    />
+  </div>
+  <figcaption>업무 테이블은 원천별 컬럼을 담는 곳이 아니라, 서비스가 유지해야 하는 관계와 생명주기를 표현합니다.</figcaption>
+</figure>
+</div>
 
 ## 공통 의미로 번역하는 방식
 
@@ -191,10 +243,9 @@ public record CanonicalInventoryRecord(
 여기서 `adapter`는 모든 변환을 다시 수행하는 거대한 클래스가 아닙니다. 현재 구현의 `InventorySourceAdapter`는 record의 `sourceType`이 자신이 담당하는 원천과 맞는지 확인하고 `InventorySyncAttemptBuffer`에 넣는 계약에 가깝습니다. 필드 변환은 SQL projection, 의미 검증은 typed record가 맡습니다.
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="3단계 필드 표준화">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e7891f] text-sm font-bold text-white">03</span>
+  <div className="mb-4" aria-label="필드 표준화">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#b46b16]">3단계 · 필드 표준화</p>
+      <p className="text-sm font-bold tracking-wide text-[#b46b16]">필드 표준화</p>
       <p className="text-sm text-foreground/60">원천 컬럼명을 서비스가 이해하는 공통 필드로 번역합니다.</p>
     </div>
   </div>
@@ -229,10 +280,9 @@ source_type + source_record_key
 ```
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="4단계 승인 매핑">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3575c5] text-sm font-bold text-white">04</span>
+  <div className="mb-4" aria-label="승인 매핑">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#3575c5]">4단계 · 승인 매핑</p>
+      <p className="text-sm font-bold tracking-wide text-[#3575c5]">승인 매핑</p>
       <p className="text-sm text-foreground/60">원천 키를 기존 canonical PK와 명시적으로 연결합니다.</p>
     </div>
   </div>
@@ -248,7 +298,54 @@ source_type + source_record_key
 </figure>
 </div>
 
+`INVENTORY_SOURCE_ROW_MAP`의 컬럼은 단순한 외부 키 목록이 아닙니다. 원천 행의 식별자와 publish 대상의 여러 외래 키를 한 레코드에 함께 보관해, 동기화 코드가 이름 유사도나 순서에 의존하지 않도록 합니다.
+
+| 컬럼 묶음 | 대표 컬럼 | 검증 포인트 |
+| --- | --- | --- |
+| 원천 식별 | `source_type`, `source_record_key` | 같은 원천 안에서 한 행을 재현할 수 있어야 합니다. |
+| 기준 대상 | `product_id`, `sku_id`, `sales_point_id`, `warehouse_id`, `lot_id` | 실제 canonical 행이 존재하고 현재 source의 위치 의미와 맞아야 합니다. |
+| 반영 대상 | `inventory_balance_id`, `sku_channel_price_id`, `sku_cost_id`, `inventory_policy_id` | publish 시 갱신할 행을 명시적으로 결정합니다. |
+| 매핑 상태 | `mapping_method`, `mapping_status`, `mapping_version`, `validated_at` | 승인되지 않은 매핑을 운영 경로에서 사용하지 않도록 합니다. |
+| 감사 정보 | 생성·수정 사용자와 시각 | 누가 어떤 매핑을 승인했는지 역추적합니다. |
+
+<div className="not-prose my-10">
+  <figure>
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-row-map-schema-ai.png"
+      alt="원천 한 행의 source type과 source record key가 INVENTORY_SOURCE_ROW_MAP의 원천 키, 기준 ID, 매핑 상태, 매핑 버전을 거쳐 상품 SKU, LOT 가격, 재고 정책에 연결되는 도식"
+      className="h-auto w-full object-contain"
+    />
+  </div>
+  <figcaption>row map은 자동 추측 결과가 아니라 승인된 기준 ID와 매핑 상태를 함께 보관하는 연결 테이블입니다.</figcaption>
+</figure>
+</div>
+
 현재 초기 매핑은 `mapping_method = INITIAL_EXACT`, `mapping_status = MAPPED` 조합으로 기록합니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
+
+## 동기화 실행과 원천별 상태를 별도 테이블로 나눴습니다
+
+동기화가 한 번 실행되었다는 사실과 원천 current의 현재 상태는 같은 데이터가 아닙니다. `INVENTORY_SYNC_RUN`은 요청 하나의 생명주기를, `INVENTORY_SYNC_RUN_SOURCE`는 그 실행 안에서 원천별 처리량을, `INVENTORY_SOURCE_STATE`는 원천의 마지막 성공 기준선을, `INVENTORY_SYNC_ERROR`는 실패한 행의 맥락을 기록합니다. 네 책임을 한 테이블에 넣으면 “실행이 실패했지만 원천 상태는 마지막 성공 버전으로 유지되는” 상황을 표현하기 어려워집니다.
+
+| 테이블 | 대표 컬럼 | 왜 필요한가 |
+| --- | --- | --- |
+| `INVENTORY_SYNC_RUN` | `client_request_id`, `request_hash`, `run_status`, `current_phase`, `fencing_token`, `read_count`, `changed_count`, `error_count` | 중복 요청을 멱등하게 묶고, 실행 전체의 상태와 통계를 남깁니다. |
+| `INVENTORY_SYNC_RUN_SOURCE` | `source_type`, `start_version`, `end_version`, `start_checksum`, `end_checksum`, `source_status` | 같은 실행 안에서도 원천별 시작·종료 기준과 결과를 분리합니다. |
+| `INVENTORY_SOURCE_STATE` | `current_version`, `last_verified_checksum`, `last_success_sync_run_id`, `last_success_synced_at` | 다음 실행이 비교할 원천별 기준선을 보관합니다. |
+| `INVENTORY_SYNC_ERROR` | `source_record_key`, `error_phase`, `field_name`, `error_code`, `error_message` | 한 행의 어떤 필드가 projection·mapping·publish 중 실패했는지 기록합니다. |
+
+<div className="not-prose my-10">
+  <figure>
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-sync-control-ai.png"
+      alt="동기화 실행이 네 원천별 실행으로 나뉘고 읽은 행, 매핑된 행, 변경된 행, 오류 행 통계가 원천 상태와 오류 기록으로 모인 뒤 정상 반영으로 이어지는 운영 메타데이터 흐름"
+      className="h-auto w-full object-contain"
+    />
+  </div>
+  <figcaption>실행 메타데이터는 재고 업무 데이터와 분리되어 중복 실행·재시도·원천별 실패를 설명합니다.</figcaption>
+</figure>
+</div>
 
 ## 초기 fixture는 운영 기능과 분리합니다
 
@@ -276,10 +373,9 @@ generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `can
 이 규칙은 같은 balance를 채널 원천과 물류센터 원천에 동시에 복제하지 않게 합니다. 현재 승인 fixture 기준으로 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 합계 `33,358`행이며 row map도 `33,358`건입니다.
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="5단계 초기 fixture 생성">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#7d63c4] text-sm font-bold text-white">05</span>
+  <div className="mb-4" aria-label="초기 fixture">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#7054b9]">5단계 · 초기 fixture</p>
+      <p className="text-sm font-bold tracking-wide text-[#7054b9]">초기 fixture</p>
       <p className="text-sm text-foreground/60">승인된 canonical snapshot에서 원천 입력을 만듭니다.</p>
     </div>
   </div>
@@ -308,10 +404,9 @@ canonical on_hand_qty = 10
 생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. 같은 입력을 다시 넣어도 같은 결과가 나오는지 `--verify`로 확인합니다.
 
 <div className="not-prose my-10">
-  <div className="mb-4 flex items-center gap-3" aria-label="6단계 변경 검증">
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#5b6f8e] text-sm font-bold text-white">06</span>
+  <div className="mb-4" aria-label="변경 검증">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#536780]">6단계 · 변경 검증</p>
+      <p className="text-sm font-bold tracking-wide text-[#536780]">변경 검증</p>
       <p className="text-sm text-foreground/60">바뀐 행만 반영하고 첫 동기화 기준선을 확인합니다.</p>
     </div>
   </div>
@@ -326,6 +421,21 @@ canonical on_hand_qty = 10
   <figcaption>hash 비교는 변경 후보를 줄이는 단계이며, 실제 canonical 반영은 target별 비교와 transaction 안에서 수행합니다.</figcaption>
 </figure>
 </div>
+
+## 시연용 차감 테이블은 정식 정규화 경로와 분리합니다
+
+ERD에서 `INVENTORY_DEMO_ADJUSTMENT`가 보이기 때문에 이 테이블이 원천 통합의 핵심이라고 오해하기 쉽습니다. V23 마이그레이션의 주석처럼 이 테이블은 **local/demo 전용 원천 차감 audit**이며, canonical 테이블을 직접 변경하지 않습니다. 기본 설정 `app.inventory-sync.demo-enabled=false`에서는 Controller 자체가 활성화되지 않습니다.
+
+시연에서 특정 원천 행의 수량을 20에서 15로 바꾸고 싶을 때는 요청 hash와 원천 행 버전을 함께 기록합니다. 서비스는 source state와 source row를 잠근 뒤 current 수량·row version·hash를 바꾸고, `INVENTORY_DEMO_ADJUSTMENT`에 요청자·적용 시각·변경 전후 값을 남깁니다. 이후 실제 sync가 이 current 변경을 읽어 canonical publish 대상으로 판단합니다. 이렇게 하면 “시연을 위한 입력 변화”와 “정식 업무 데이터 반영”의 transaction을 혼동하지 않습니다.
+
+| 구분 | `INVENTORY_DEMO_ADJUSTMENT` | canonical 업무 테이블 |
+| --- | --- | --- |
+| 목적 | 시연·검증을 위한 원천 current 변화의 audit | 서비스가 제공하는 상품·재고·위험 결과 |
+| 변경 대상 | 네 source current와 `INVENTORY_SOURCE_STATE` | 승인된 row map으로 연결된 기존 업무 행 |
+| 안전장치 | `request_hash`, source row version 전후, rate limit, 중복 요청 방지 | typed record 검증, target 비교, publish transaction |
+| 운영 여부 | demo property가 켜진 로컬·검증 환경에서만 활성화 | 실제 동기화 경로의 정식 데이터 |
+
+따라서 이 테이블은 전체 DB 도식에서는 보조 영역으로 표시하고, 원천을 canonical로 번역하는 핵심 설계와 섞어 설명하지 않습니다.
 
 ## 왜 `MERGE`와 no-op 기준선을 사용했는가
 
@@ -405,6 +515,9 @@ Buffer -> Target: changed record만 publish transaction에서 반영
 - `docs/integrated-inventory/INTEGRATED-INVENTORY-CODE-OVERVIEW.md`
 - `docs/plans/2026-08-20-002-feat-source-normalization-sync-plan.md`
 - `docs/plans/2026-08-22-001-feat-integrated-inventory-closeout-plan.md`
+- `BackEnd/docs/erd/통합재고조회-흐름배치-한글-snapshot.json`
+- `BackEnd/docs/erd/flyway-v24-full-schema-mermaid.md`
+- `docs/integrated-inventory/FLYWAY-SCHEMA-CATALOG.md`
 
 ### 실제 구현 경로
 
