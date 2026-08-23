@@ -1,15 +1,15 @@
 ---
-title: "원천 4종을 하나의 통합재고로 연결하기: 공통 메모리 형식과 승인 매핑 설계"
+title: "원천 4종을 하나의 통합재고로 연결하기: 공통 메모리 형식과 검증 매핑 설계"
 date: "2026-08-23"
 lastModified: "2026-08-23"
 published: true
 section: "개발 기록"
 category: "Data Architecture / Inventory"
-tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Flyway", "Fixture", "ETL"]
+tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Fixture", "ETL"]
 cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
 coverAlt: "밝은 배경에서 오프라인, 이커머스, 그리팅, 물류센터 재고가 공통 번역기와 검증·매핑을 거쳐 canonical 테이블로 연결되는 설명 도식"
 coverFit: "contain"
-description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않고 공통 메모리 형식으로 정규화한 과정과, canonical snapshot 기반 fixture·row map·hash 설계를 정리합니다."
+description: "오프라인·이커머스·그리팅·물류센터의 서로 다른 재고를 하나의 서비스 기준으로 번역한 과정을 설명합니다. 원천 테이블을 유지한 이유부터 매핑·변경 감지·초기 데이터 생성의 선택과 트레이드오프까지 정리합니다."
 ---
 
 ## 이 기능이 필요했던 배경
@@ -30,7 +30,34 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 
 ## 한 문장으로 요약하면
 
-`OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE`의 current 행을 원천별 SQL projection으로 `CanonicalInventoryRecord`에 맞추고, 승인된 `INVENTORY_SOURCE_ROW_MAP`을 기준으로 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 같은 기존 행을 업데이트합니다.
+`OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE`의 current 행을 원천별 SQL projection으로 `CanonicalInventoryRecord`에 맞추고, 검증된 `MAPPED` 상태의 `INVENTORY_SOURCE_ROW_MAP`을 기준으로 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 같은 기존 행을 업데이트합니다.
+
+## 용어와 책임 경계
+
+| 용어 | 이 글에서의 뜻 |
+| --- | --- |
+| 원천 데이터 | 오프라인·이커머스·그리팅·물류센터가 각자 관리하는 현재 재고입니다. |
+| `canonical` | 우리 서비스가 최종적으로 사용하는 정식 업무 데이터 모델입니다. 모든 데이터를 한 테이블에 넣는다는 뜻은 아닙니다. |
+| `projection` | SQL의 `SELECT ... AS ...`로 원천 컬럼을 공통 이름과 타입으로 변환해 조회하는 과정입니다. |
+| `row map` | 원천 행과 기존 상품·SKU·LOT·재고 행을 연결하는 매핑 테이블입니다. |
+| `fixture` | 테스트·개발 환경에서 같은 초기 데이터를 재생성할 수 있도록 준비한 데이터입니다. |
+
+본문에서 `current`는 “해당 원천이 현재 가지고 있는 최신 행”, `publish`는 “검증을 통과한 값을 정식 업무 테이블에 반영하는 단계”를 뜻합니다. `hash`는 값을 일정한 규칙으로 요약한 문자열이고, 이전 `hash`와 달라졌는지를 이용해 변경 후보를 찾습니다.
+
+## 전체 흐름
+
+이 기능은 “네 테이블을 하나로 합치는 작업”이라기보다, **서로 다른 네 문서를 읽고, 같은 기준으로 번역하고, 맞는 대상에만 반영하는 작업**입니다.
+
+| 단계 | 하는 일 | 이 단계가 끝났을 때 |
+| --- | --- | --- |
+| 1. 기준 데이터 준비 | canonical snapshot·SKU mapping·원천 raw fixture를 generator로 조합해 원천 current 형태로 변환합니다. | 네 원천 테이블에 재현 가능한 초기 데이터가 생깁니다. |
+| 2. 원천 행 읽기 | 원천별 SQL projection으로 컬럼명·날짜·수량 표현을 맞춥니다. | 네 원천 행이 같은 공통 필드 모양으로 보입니다. |
+| 3. 대상 연결 | `INVENTORY_SOURCE_ROW_MAP`으로 원천 행과 기존 canonical PK를 먼저 연결합니다. | 어떤 상품·SKU·LOT·재고 행을 바꿀지 확정됩니다. |
+| 4. 의미 검증 | 연결된 ID와 공통 필드를 `CanonicalInventoryRecord`가 검사합니다. | 잘못된 행은 publish 전에 멈춥니다. |
+| 5. 변경 후보 찾기 | `record_hash`와 `synced_record_hash`를 비교합니다. | 바뀐 행만 다음 단계로 넘어갑니다. |
+| 6. 정식 반영 | 검증된 행을 `MERGE`와 transaction으로 canonical 테이블에 반영합니다. | 서비스가 조회하는 통합재고가 갱신됩니다. |
+
+각 단계에서 선택지를 비교한 뒤 현재 구조를 선택했습니다. 핵심은 테이블 목록이 아니라 **문제를 어떤 순서로 나누고, 각 경계에서 무엇을 포기하고 무엇을 지켰는지**에 있습니다.
 
 <div className="not-prose my-10">
   <div className="mb-4" aria-label="통합 목표">
@@ -51,9 +78,11 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 </figure>
 </div>
 
-## 문제는 컬럼명이 아니라 책임의 경계였습니다
+## 설계 1. 문제를 컬럼명이 아닌 책임의 경계로 정의했습니다
 
 네 원천은 모두 “재고”를 말하지만 같은 언어를 사용하지 않습니다. 가용 수량만 해도 오프라인은 `available_stock_count`, 이커머스는 `sellable_quantity`, 그리팅은 `saleable_meal_count`, 물류센터는 `physical_available_qty`라는 이름을 씁니다.
+
+먼저 문제를 “컬럼명을 하나로 바꾸는 일”이 아니라 “각 데이터가 어디까지 책임지는지 정하는 일”로 정의했습니다. 이 정의가 뒤의 테이블 분리와 변환 위치를 결정하는 출발점이 되었습니다.
 
 이름만 다른 것이 아닙니다. 그리팅은 식수 단위와 품절 플래그를 가지고, 물류센터는 판매처가 없는 공용 재고를 가집니다. 이커머스에는 결제 수수료와 배송비가 있지만 물류센터에는 판매 가격이 없습니다. 공통 테이블 하나에 전부 욱여넣으면 컬럼은 많아지고, 어느 값이 필수인지도 흐려집니다.
 
@@ -67,12 +96,22 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 
 여기서 말하는 `canonical`은 “모든 데이터를 한 테이블에 저장한다”는 뜻이 아닙니다. 서비스가 상품, SKU, 가격, LOT, 정책, 재고를 어떤 의미로 다룰지 정한 **정식 업무 모델**입니다.
 
-## 데이터 계층을 먼저 나눴습니다
+이 선택에는 분명한 대가가 있습니다. 원천별 SQL을 네 번 관리해야 하므로 처음 작성하는 코드는 늘어납니다. 대신 원천의 차이를 projection 경계에 가둘 수 있고, 이후 화면이나 위험도 계산 로직은 공통 필드만 바라보게 됩니다. 즉, 한 곳의 코드가 조금 복잡해지는 대신 여러 기능에 같은 예외를 반복하지 않는 쪽을 택했습니다.
 
-처음부터 코드부터 읽으면 `current`, `row map`, `source state`, `canonical`이 한꺼번에 등장해 흐름을 놓치기 쉽습니다. 이 작업에서는 데이터의 수명과 책임을 기준으로 계층을 나눴습니다.
+| 설계 선택 | 얻는 것 | 감수하는 것 | 이번 글의 판단 |
+| --- | --- | --- | --- |
+| 공통 테이블 하나 | 조회 진입점이 단순합니다. | 원천별 필수값이 흐려지고 `NULL`이 늘어납니다. | 원천 계약을 보존하기 위해 선택하지 않았습니다. |
+| 원천별 SQL projection | 변환 위치가 눈에 보이고 SQL로 확인할 수 있습니다. | 원천이 늘면 projection도 하나 추가해야 합니다. | 현재 네 원천의 차이를 한 경계에 모으기 위해 선택했습니다. |
+| Java에서 모든 변환 | IDE와 타입 도구를 활용하기 쉽습니다. | 날짜·NULL·원천별 예외가 거대한 adapter에 모일 수 있습니다. | 현재 필드 이름·타입 변환은 SQL, 공통 의미 검증은 Java로 나눴습니다. |
+
+여기서 `staging`은 변환 중간 결과를 DB에 저장해두는 공간이고, `buffer`는 한 번의 실행 동안 메모리에 잠시 모아두는 공간입니다. 이번 구현은 장기간 다시 볼 중간 결과가 필요하지 않아 staging 테이블 대신 typed record와 buffer를 사용합니다.
+
+## 설계 2. 데이터의 수명과 책임을 먼저 나눴습니다
+
+`current`, `row map`, `source state`, `canonical`은 데이터의 수명과 책임이 다르므로 계층을 나누어 설계했습니다.
 
 ```text
-크롤링 파일 + 승인된 canonical snapshot
+원천 raw fixture + canonical snapshot + SKU mapping
                 │  (초기 fixture 생성 때만)
                 ▼
 원천 current 4종
@@ -80,7 +119,8 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
                 │
                 ├─ source_record_key로 현재 행을 식별
                 ├─ INVENTORY_SOURCE_ROW_MAP으로 기존 PK 연결
-                └─ record_hash / row_version으로 변경 기준 보관
+                ├─ record_hash로 변경 후보를 판별
+                └─ current_version으로 읽는 동안 원천 일관성 확인
                 ▼
 메모리 전용 CanonicalInventoryRecord
                 │
@@ -101,7 +141,7 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-source-layers-ai.png"
-      alt="승인된 canonical snapshot에서 원천 current 네 종류, row map, CanonicalInventoryRecord, canonical 업무 테이블로 이어지는 데이터 계층과 실행 메타데이터의 관계"
+      alt="원천 raw fixture와 canonical snapshot에서 원천 current 네 종류, row map, CanonicalInventoryRecord, canonical 업무 테이블로 이어지는 데이터 계층과 실행 메타데이터의 관계"
       className="h-auto w-full"
     />
   </div>
@@ -111,9 +151,11 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
 
 `INVENTORY_SYNC_RUN` 같은 실행 제어 테이블은 이 흐름에 포함되지만 재고 자체가 아닙니다. 실행 상태와 오류를 저장하는 운영 메타데이터입니다. 이런 데이터를 업무 테이블과 섞지 않아야 “현재 재고”와 “동기화가 실패했는가”를 서로 다른 질문으로 다룰 수 있습니다.
 
-## ERD와 Flyway를 함께 보면 범위가 세 겹으로 나뉩니다
+## 설계 3. 스키마 변경 이력과 ERD로 구현 범위를 확인했습니다
 
-DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보이고, Flyway만 보면 통합재고와 관계없는 전략·예측 테이블까지 한꺼번에 들어옵니다. 저장소에 보관된 통합재고 ERD 스냅샷에는 이 기능에 직접 연결되는 22개 엔터티가 있고, Flyway V1~V24에는 서비스 전체 52개 테이블이 있습니다. 따라서 ERD에 없는 Flyway 테이블은 누락이라기보다 다른 기능의 범위입니다.
+DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보이고, 버전별 SQL만 보면 통합재고와 관계없는 전략·예측 테이블까지 한꺼번에 들어옵니다. 두 자료는 서로 다른 질문에 답합니다. **ERD는 테이블 사이의 관계를 보여주는 지도**이고, **버전별 SQL은 데이터베이스 구조가 어떤 순서로 만들어졌는지 기록하는 변경 이력**입니다. 따라서 ERD에 없는 변경 이력의 테이블이 있다고 해서 곧바로 누락이라고 판단하지 않습니다. 다른 기능의 테이블이거나, ERD 스냅샷을 만든 시점 이후에 추가된 구조일 수 있습니다.
+
+버전 migration은 `V21__...sql`, `V22__...sql`처럼 버전이 붙은 SQL 파일입니다. 배포할 때 파일 순서대로 DB 구조를 바꾸므로, 이미 적용한 파일을 나중에 고치는 대신 다음 버전의 파일을 추가하는 방식으로 변경 이력을 보존합니다.
 
 이번 글에서 다루는 DB 범위는 아래처럼 나뉩니다.
 
@@ -121,7 +163,7 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 | --- | --- | --- |
 | 기준 업무 데이터 | `PRODUCT`, `SKU`, `LOT`, `SKU_CHANNEL_PRICE`, `SKU_COST`, `INVENTORY_POLICY`, `INVENTORY_BALANCE` | 통합재고가 최종적으로 사용하는 상품·가격·LOT·정책·수량의 정식 모델입니다. |
 | 원천 current | `INVENTORY_SOURCE_OFFLINE`, `INVENTORY_SOURCE_ECOMMERCE`, `INVENTORY_SOURCE_GREETING`, `INVENTORY_SOURCE_WAREHOUSE` | 네 시스템의 서로 다른 컬럼과 원천별 필수 조건을 그대로 보존합니다. |
-| 연결·검증 | `INVENTORY_SOURCE_ROW_MAP`, `INVENTORY_SOURCE_STATE` | 원천 키를 승인된 기준 PK에 연결하고 버전·checksum 기준을 기록합니다. |
+| 연결·검증 | `INVENTORY_SOURCE_ROW_MAP`, `INVENTORY_SOURCE_STATE` | 원천 키를 검증된 기준 PK에 연결하고 버전·checksum 기준을 기록합니다. |
 | 실행 운영 | `INVENTORY_SYNC_MUTEX`, `INVENTORY_SYNC_RUN`, `INVENTORY_SYNC_RUN_SOURCE`, `INVENTORY_SYNC_ERROR` | 중복 실행 방지, 실행 상태, 원천별 통계, 행 단위 오류를 분리합니다. |
 | 연계·보조 | `RISK_ASSESSMENT`, `INVENTORY_DEMO_ADJUSTMENT` | 재고 변경의 위험 평가 lineage와 시연용 원천 차감 이력을 보관합니다. |
 
@@ -130,7 +172,7 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
       src="/images/blog/inventory-db-scope-ai.png"
-      alt="오프라인, 이커머스, 그리팅, 물류센터 원천 current가 승인 row map을 거쳐 상품, SKU, LOT, 가격, 원가, 정책, 재고 현황으로 연결되고 동기화 운영과 위험 평가가 분리된 DB 설계 범위"
+      alt="오프라인, 이커머스, 그리팅, 물류센터 원천 current가 검증된 MAPPED row map을 거쳐 상품, SKU, LOT, 가격, 원가, 정책, 재고 현황으로 연결되고 동기화 운영과 위험 평가가 분리된 DB 설계 범위"
       className="h-auto w-full object-contain"
     />
   </div>
@@ -138,9 +180,9 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 </figure>
 </div>
 
-이 범위는 `BackEnd/docs/erd/통합재고조회-흐름배치-한글-snapshot.json`과 `BackEnd/docs/erd/flyway-v24-full-schema-mermaid.md`를 기준으로 확인했습니다. V21~V24가 원천 current, durable sync, risk lineage, demo adjustment를 추가하고, V22에서 `RISK_ASSESSMENT.inventory_sync_run_id`를 연결하며, V24에서 `SCHEDULED` 트리거를 허용합니다. 최신 전체 마이그레이션이 궁금하다면 [ERDCloud 통합재고조회](https://www.erdcloud.com/d/SPGTMr3v6k3tQKME9)와 저장소의 Flyway 카탈로그를 함께 보는 것이 안전합니다.
+이 범위는 `BackEnd/docs/erd/통합재고조회-흐름배치-한글-snapshot.json`과 버전별 전체 스키마 도식을 기준으로 확인했습니다. V21~V24는 원천 current와 동기화 실행·상태·오류 구조를 추가했고, V22는 `RISK_ASSESSMENT.inventory_sync_run_id`를 연결했으며, V24는 예약 실행을 허용합니다. 최신 전체 마이그레이션은 [ERDCloud 통합재고조회](https://www.erdcloud.com/d/SPGTMr3v6k3tQKME9)와 저장소의 버전별 SQL을 함께 확인합니다.
 
-## 왜 원천 테이블을 네 개로 유지했는가
+## 설계 4. 원천 테이블 네 개를 유지했습니다
 
 원천 current의 한 행은 `특정 원천의 특정 SKU가 특정 위치·LOT에서 현재 어떤 수량과 가격·정책을 가지는가`를 나타냅니다. 상품명과 SKU명이 LOT 행마다 반복되는 넓은 구조지만, 원천 전송 레코드에 가깝다는 목적에는 맞습니다.
 
@@ -148,9 +190,11 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 
 원천별 테이블은 각 계약을 DB 제약과 테스트로 확인할 수 있게 해줍니다. 예를 들어 물류센터 행의 `assigned_sales_point_code`는 현재 `NULL`이어야 합니다. 센터 공용 재고를 판매처 재고로 복제하면 통합재고 합계가 부풀기 때문입니다.
 
-## canonical 업무 테이블은 관계를 보존하도록 나눴습니다
+## 설계 5. canonical 업무 관계를 보존하도록 나눴습니다
 
 정식 업무 데이터도 하나의 넓은 `CANONICAL_INVENTORY` 테이블로 만들지 않았습니다. 상품의 정체성, SKU의 판매 단위, LOT의 유통기한, 채널별 가격, 원가, 재고 정책, 실제 잔량은 변경 주기와 책임이 다르기 때문입니다. 관계를 분리해두면 원천 컬럼명이 바뀌어도 기존 상품·SKU·LOT의 의미를 다시 정의하지 않아도 됩니다.
+
+여기서 `PK`는 테이블 안에서 한 행을 구분하는 고유 ID이고, `FK`는 다른 테이블의 PK를 가리키는 연결 값입니다. 예를 들어 `SKU.product_id`는 “이 SKU가 어느 상품에 속하는지”를 알려주는 FK입니다. 이 연결을 사용하면 이름이 비슷하다는 이유로 다른 상품을 골라 연결하는 일을 줄일 수 있습니다.
 
 | 관계 | 핵심 컬럼 | 이렇게 나눈 이유 |
 | --- | --- | --- |
@@ -159,6 +203,12 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 | SKU·센터·판매처 → 정책 | `INVENTORY_POLICY.sku_id`, `warehouse_id`, `stock_sales_point_id` | 안전재고·목표재고·보유비용은 위치와 판매처 조합의 정책입니다. 재고 수량 자체와 섞지 않습니다. |
 | SKU·센터·판매처·LOT → 재고 현황 | `INVENTORY_BALANCE`의 `on_hand_qty`, `reserved_qty`, `total_qty` | 실제 보유량과 예약량을 분리하고 `total_qty`는 Oracle virtual column으로 계산합니다. 예약량을 다시 빼서 중복 차감하지 않습니다. |
 | 재고 현황 → 위험 평가 | `RISK_ASSESSMENT.inventory_balance_id`, `inventory_sync_run_id` | 어떤 재고와 어떤 동기화 실행을 근거로 위험도를 계산했는지 추적합니다. `inventory_sync_run_id`는 V22에서 추가되었습니다. |
+
+### 이 관계를 하나의 넓은 테이블로 합치지 않은 이유
+
+하나의 테이블에 상품명·가격·LOT·정책·재고 수량을 모두 넣으면 처음 조회하는 SQL은 짧아질 수 있습니다. 하지만 가격과 LOT가 같은 재고 행에 반복 저장되면 가격 변경 범위가 여러 행으로 넓어지고, 서로 다른 생명주기의 값이 같은 저장 단위에 묶일 수 있습니다. 반대로 관계를 나누면 조인(join)이 필요해 조회 SQL은 길어지지만, 각 값이 무엇을 책임지는지와 변경 범위가 분명해집니다.
+
+이번 기능은 조회 SQL을 가장 짧게 만드는 것보다 **원천 컬럼이 바뀌어도 서비스의 상품·SKU·LOT 관계가 흔들리지 않는 것**을 우선했습니다.
 
 <div className="not-prose my-10">
   <figure>
@@ -173,9 +223,75 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 </figure>
 </div>
 
-## 공통 의미로 번역하는 방식
+## 설계 6. 초기 fixture는 운영 기능과 분리했습니다
 
-실제 필드 변환의 중심은 Java adapter보다 `InventorySyncSourcePageMapper.xml`의 SQL projection입니다. 원천별 SELECT가 서로 다른 컬럼을 같은 alias와 타입으로 맞추고, `CanonicalInventoryRecord`가 그 결과를 받습니다.
+이제 실제 동기화가 읽을 출발 데이터를 준비합니다. `dummy-data/scripts/generate_inventory_source_current.mjs`는 운영 중 원천을 읽는 worker가 아니라 **검증된 기준 입력 묶음을 원천 current 모양으로 만드는 generator**입니다. `snapshot`은 특정 시점의 기준 데이터를 고정해둔 복사본이고, `generator`는 그 기준을 여러 원천 형식으로 다시 만들어주는 프로그램입니다. 이 경로는 운영 기능이 아니라 개발·검증 데이터를 준비하는 경로입니다.
+
+방향은 런타임과 반대입니다.
+
+```text
+fixture 생성: canonical snapshot + SKU mapping + raw fixture → source current
+실제 sync:    source current → CanonicalInventoryRecord → canonical
+```
+
+generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `canonical_sku_cost_current.csv`, `canonical_lot_current.csv`, `canonical_inventory_policy_current.csv`, `canonical_inventory_balance_current.csv` 여섯 snapshot에 `sku_mapping.csv`와 그리팅·모두의집·더현대·홈플러스 원천 raw fixture를 함께 사용합니다. canonical ID와 원천의 상품·옵션 정보를 조인해 serializer에 전달한 뒤 source current, row map, manifest를 만듭니다. `baseline_manifest.json`의 행 수와 checksum이 맞지 않으면 생성하지 않습니다. `checksum`은 파일이나 데이터가 기준본과 같은지 확인하기 위해 계산하는 요약값입니다. 내용이 조금만 달라도 다른 checksum이 나오므로, 조용히 바뀐 입력을 발견하는 데 사용합니다.
+
+각 `INVENTORY_BALANCE` 행은 `allocated_sales_point_code` 기준으로 정확히 하나의 원천에 배치합니다.
+
+| 조건 | 생성되는 원천 |
+| --- | --- |
+| `MODU_MATJIP` | `ECOMMERCE` |
+| `GREETING` | `GREETING` |
+| `HMART_` 또는 `DEPT_` 접두사 | `OFFLINE` |
+| 할당 판매처 없음 | `WAREHOUSE` |
+| 알 수 없는 판매처 | 생성 실패 |
+
+이 규칙은 같은 balance를 채널 원천과 물류센터 원천에 동시에 복제하지 않게 합니다. 현재 기준 fixture에서 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 합계 `33,358`행이며 row map도 `33,358`건입니다. 이 숫자는 현재 fixture의 검증 결과이지, 운영 원천의 영구적인 건수 약속은 아닙니다.
+
+<div className="not-prose my-10">
+  <div className="mb-4" aria-label="초기 fixture">
+    <div>
+      <p className="text-sm font-bold tracking-wide text-[#7054b9]">초기 fixture</p>
+      <p className="text-sm text-foreground/60">snapshot·SKU mapping·raw fixture를 조합해 원천 입력을 만듭니다.</p>
+    </div>
+  </div>
+  <figure>
+  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
+    <img
+      src="/images/blog/inventory-source-lifecycle-ai.png"
+      alt="canonical snapshot 여섯 개를 generator가 키 기반으로 조인하고 원천 current 네 종류, row map, generation manifest, MERGE loader를 만드는 초기 fixture 생성 흐름"
+      className="h-auto w-full"
+    />
+  </div>
+  <figcaption>초기 fixture는 운영 sync의 입력을 만드는 별도 경로입니다. 생성 결과에는 source current, row map, manifest가 함께 남습니다.</figcaption>
+</figure>
+</div>
+
+generator는 원천별 serializer로 같은 값을 다른 컬럼명으로 표현합니다.
+
+```text
+canonical on_hand_qty = 10
+  → OFFLINE.available_stock_count = 10
+  → ECOMMERCE.sellable_quantity = 10
+  → GREETING.saleable_meal_count = 10
+  → WAREHOUSE.physical_available_qty = 10
+```
+
+생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. `--verify`는 generator를 다시 실행하는 명령이 아니라, baseline 입력과 기존 산출물의 checksum·row count가 manifest와 일치하는지 확인하는 명령입니다. 같은 입력으로 다시 생성한 결과까지 비교하려면 별도의 임시 출력 디렉터리에서 재생성한 뒤 checksum을 비교해야 합니다.
+
+초기 데이터를 만드는 방법도 세 가지를 비교했습니다.
+
+| 방법 | 장점 | 단점 | 선택 |
+| --- | --- | --- | --- |
+| 사람이 CSV를 직접 작성 | 시작이 빠릅니다. | 사람마다 값이 달라지고 다시 재현하기 어렵습니다. | 선택하지 않았습니다. |
+| 운영 원천을 그대로 복사 | 실제와 비슷합니다. | 개인정보·운영 변경이 섞이고 기준 시점을 고정하기 어렵습니다. | 선택하지 않았습니다. |
+| 기준 snapshot에서 generator 실행 | 같은 기준으로 반복 생성하고 검증할 수 있습니다. | snapshot과 생성 규칙을 함께 관리해야 합니다. | 현재 선택입니다. |
+
+## 설계 7. 원천 필드를 공통 의미로 번역했습니다
+
+기준 입력이 준비됐으니 이제 실제 sync가 한 행을 읽는 방향으로 넘어갑니다. 실제 필드 변환의 중심은 Java adapter보다 `InventorySyncSourcePageMapper.xml`의 SQL projection입니다. `MyBatis`는 Java 메서드와 XML에 적은 SQL을 연결해주는 도구입니다. 이 프로젝트에서는 MyBatis mapper의 원천별 `SELECT`가 서로 다른 컬럼을 같은 alias와 타입으로 맞추고, `CanonicalInventoryRecord`가 그 결과를 받습니다.
+
+`SQL projection`은 원천 테이블을 복사하는 작업이 아닙니다. `SELECT item_name AS product_name`처럼 **이번 조회에서만 다른 이름으로 보여주는 변환**입니다. 원천 테이블의 컬럼명은 그대로 남아 있으므로 원천 시스템의 계약을 훼손하지 않습니다.
 
 | 공통 의미 | OFFLINE | ECOMMERCE | GREETING | WAREHOUSE |
 | --- | --- | --- | --- | --- |
@@ -187,7 +303,7 @@ DB 설계를 확인할 때 ERDCloud 그림만 보면 전체 스키마처럼 보�
 | 안전재고 | `safe_stock_count` | `safety_quantity` | `minimum_stock_count` | `center_safety_qty` |
 | 소비기한 | `use_by_date_text` | `expires_on_text` | `consume_by_text` | `expiry_date_text` |
 
-SQL은 이름만 바꾸지 않습니다. 문자열 날짜를 `TO_DATE(..., 'YYYY-MM-DD')`로 바꾸고, 그리팅의 `sold_out_flag`를 `sale_available_yn`으로 반전하며, 물류센터처럼 판매 가격이 없는 원천에는 `NULL`을 명시합니다.
+SQL은 이름만 바꾸지 않습니다. 문자열 날짜를 `TO_DATE(..., 'YYYY-MM-DD')`로 바꾸고, 그리팅의 `sold_out_flag`를 `sale_available_yn`으로 반전하며, 물류센터처럼 판매 가격이 없는 원천에는 `NULL`을 명시합니다. `NULL`은 여기서 “실수로 빠진 값”이라고 단정하는 것이 아니라, 해당 원천에는 판매 가격이라는 개념이 없다는 뜻일 수 있습니다. 이 차이를 검증 단계에서 구분해야 합니다.
 
 ```sql
 -- InventorySyncSourcePageMapper.xml 중 원천별 projection의 핵심
@@ -204,7 +320,7 @@ SELECT display_product_title AS product_name,
    AND is_deleted = 0
 ```
 
-이 결과를 받는 `CanonicalInventoryRecord`는 DB staging table에 저장하지 않는 메모리 전용 record입니다. 생성자에서 `productId`, `skuId`, `warehouseId`, `lotId`, `inventoryBalanceId`가 양수인지, 수량이 음수가 아닌지, `reservedQty`가 `onHandQty`보다 크지 않은지 검사합니다. 검증을 통과하지 못한 행은 임의의 기본값으로 publish하지 않습니다.
+이 결과를 받는 `CanonicalInventoryRecord`는 DB staging table에 저장하지 않는 메모리 전용 `typed record`입니다. typed record는 필드 이름과 타입을 정해둔 데이터 묶음이므로, 문자열 Map처럼 어떤 값이든 들어가게 두지 않습니다. 생성자에서 `productId`, `skuId`, `warehouseId`, `lotId`, `inventoryBalanceId`가 양수인지, 수량이 음수가 아닌지, `reservedQty`가 `onHandQty`보다 크지 않은지 검사합니다. 검증을 통과하지 못한 행은 임의의 기본값으로 publish하지 않습니다.
 
 아래 코드는 실제 `CanonicalInventoryRecord` 전체 필드 중 이 글에서 설명하는 ID·수량 검증 부분만 줄여 옮긴 예시입니다. 실제 record에는 `categoryId`, `salesPointId`, 가격·원가·LOT·정책 필드와 원천 버전 정보가 함께 들어 있습니다.
 
@@ -240,7 +356,13 @@ public record CanonicalInventoryRecord(
 }
 ```
 
-여기서 `adapter`는 모든 변환을 다시 수행하는 거대한 클래스가 아닙니다. 현재 구현의 `InventorySourceAdapter`는 record의 `sourceType`이 자신이 담당하는 원천과 맞는지 확인하고 `InventorySyncAttemptBuffer`에 넣는 계약에 가깝습니다. 필드 변환은 SQL projection, 의미 검증은 typed record가 맡습니다.
+여기서 `adapter`는 “원천별 차이를 서비스 내부로 들여오는 경계”입니다. 현재 구현의 `InventorySourceAdapter`는 모든 변환을 다시 수행하는 거대한 클래스가 아닙니다. record의 `sourceType`이 자신이 담당하는 원천과 맞는지 확인하고 `InventorySyncAttemptBuffer`에 넣는 계약에 가깝습니다. 필드 이름·날짜·수량 변환은 SQL projection, 공통 의미 검증은 typed record, 원천 종류 확인은 adapter가 맡도록 역할을 나눴습니다.
+
+| 변환을 맡길 위치 | 장점 | 단점 | 이번 설계 |
+| --- | --- | --- | --- |
+| SQL projection | 원천 컬럼과 변환 규칙이 한 화면에 보입니다. DB에서 날짜·NULL 변환을 확인할 수 있습니다. | SQL이 길어지고 원천별 SELECT를 관리해야 합니다. | 필드명·타입 변환에 사용합니다. |
+| Java adapter | IDE 자동완성·단위 테스트를 활용하기 쉽습니다. | 모든 원천 예외가 한 클래스에 모이면 거대한 변환기가 됩니다. | source type 확인과 buffer 경계에 사용합니다. |
+| DB staging table | 중간 결과를 나중에 다시 조회할 수 있습니다. | 저장·삭제·권한·보관 기간까지 운영해야 합니다. | 장기 보관 요구가 없어 선택하지 않았습니다. |
 
 <div className="not-prose my-10">
   <div className="mb-4" aria-label="필드 표준화">
@@ -261,9 +383,9 @@ public record CanonicalInventoryRecord(
 </figure>
 </div>
 
-## 원천 키와 canonical PK를 자동 추측하지 않았습니다
+## 설계 8. 원천 키와 canonical PK를 명시적으로 연결했습니다
 
-외부의 `seller_option_no`가 내부 `sku_id`와 같다고 가정하면 빠르게 연결할 수 있습니다. 하지만 이름이 바뀌거나 같은 이름의 SKU가 생기는 순간 잘못된 재고를 수정할 위험이 있습니다.
+공통 필드가 만들어졌다고 바로 반영하지는 않습니다. 다음으로 “이 원천 행이 기존 canonical의 어느 행을 가리키는가”를 확인해야 합니다. 외부의 `seller_option_no`가 내부 `sku_id`와 같다고 가정하면 빠르게 연결할 수 있지만, 이름이 바뀌거나 같은 이름의 SKU가 생기는 순간 잘못된 재고를 수정할 위험이 있습니다.
 
 그래서 `INVENTORY_SOURCE_ROW_MAP`을 별도로 두고 원천 한 행을 기존 업무 행에 명시적으로 연결합니다.
 
@@ -280,9 +402,9 @@ source_type + source_record_key
 ```
 
 <div className="not-prose my-10">
-  <div className="mb-4" aria-label="승인 매핑">
+  <div className="mb-4" aria-label="검증 매핑">
     <div>
-      <p className="text-sm font-bold tracking-wide text-[#3575c5]">승인 매핑</p>
+      <p className="text-sm font-bold tracking-wide text-[#3575c5]">검증 매핑</p>
       <p className="text-sm text-foreground/60">원천 키를 기존 canonical PK와 명시적으로 연결합니다.</p>
     </div>
   </div>
@@ -294,7 +416,7 @@ source_type + source_record_key
       className="h-auto w-full"
     />
   </div>
-  <figcaption>원천 키와 canonical PK를 직접 비교하지 않고, 승인된 row map을 통해서만 publish 대상을 찾습니다.</figcaption>
+  <figcaption>원천 키와 canonical PK를 직접 비교하지 않고, 검증된 `MAPPED` 상태의 row map을 통해서만 publish 대상을 찾습니다.</figcaption>
 </figure>
 </div>
 
@@ -305,8 +427,8 @@ source_type + source_record_key
 | 원천 식별 | `source_type`, `source_record_key` | 같은 원천 안에서 한 행을 재현할 수 있어야 합니다. |
 | 기준 대상 | `product_id`, `sku_id`, `sales_point_id`, `warehouse_id`, `lot_id` | 실제 canonical 행이 존재하고 현재 source의 위치 의미와 맞아야 합니다. |
 | 반영 대상 | `inventory_balance_id`, `sku_channel_price_id`, `sku_cost_id`, `inventory_policy_id` | publish 시 갱신할 행을 명시적으로 결정합니다. |
-| 매핑 상태 | `mapping_method`, `mapping_status`, `mapping_version`, `validated_at` | 승인되지 않은 매핑을 운영 경로에서 사용하지 않도록 합니다. |
-| 감사 정보 | 생성·수정 사용자와 시각 | 누가 어떤 매핑을 승인했는지 역추적합니다. |
+| 매핑 상태 | `mapping_method`, `mapping_status`, `mapping_version`, `validated_at` | 검증되지 않은 매핑을 운영 경로에서 사용하지 않도록 합니다. |
+| 감사 정보 | 생성·수정 사용자와 시각 | row map 변경 이력을 추적합니다. 별도의 승인자 컬럼이나 수동 승인 workflow는 없습니다. |
 
 <div className="not-prose my-10">
   <figure>
@@ -317,22 +439,32 @@ source_type + source_record_key
       className="h-auto w-full object-contain"
     />
   </div>
-  <figcaption>row map은 자동 추측 결과가 아니라 승인된 기준 ID와 매핑 상태를 함께 보관하는 연결 테이블입니다.</figcaption>
+  <figcaption>row map은 자동 추측 결과가 아니라 기준 ID와 매핑 상태를 함께 보관하는 연결 테이블입니다.</figcaption>
 </figure>
 </div>
 
-현재 초기 매핑은 `mapping_method = INITIAL_EXACT`, `mapping_status = MAPPED` 조합으로 기록합니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
+현재 초기 매핑은 기준 snapshot에서 canonical ID를 결정적으로 조합해 `mapping_method = INITIAL_EXACT`, `mapping_status = MAPPED` 조합으로 기록합니다. 별도의 승인자 컬럼이나 수동 승인 workflow를 뜻하는 것은 아닙니다. 매핑이 없거나 필수 PK가 비어 있으면 해당 원천을 임의로 다른 상품에 연결하지 않고 fail-closed로 중단합니다. 데이터 통합에서 “일단 비슷한 이름으로 넣고 나중에 고친다”는 접근은 재고 수량과 가격을 함께 잘못 바꿀 수 있기 때문에 선택하지 않습니다.
 
-## 동기화 실행과 원천별 상태를 별도 테이블로 나눴습니다
+`fail-closed`는 문제가 생겼을 때 추측해서 계속 진행하지 않고, 안전하게 멈추는 방식입니다. 재고 통합에서는 한 건을 놓치는 것보다 엉뚱한 상품의 수량을 바꾸는 피해가 더 클 수 있으므로 이 판단을 적용했습니다. 현재 worker는 매핑 오류가 하나라도 있으면 publish 전에 전체 sync run을 실패시키고, 잘못된 행만 격리한 뒤 나머지를 계속 처리하는 부분 성공 정책은 아직 구현하지 않았습니다.
 
-동기화가 한 번 실행되었다는 사실과 원천 current의 현재 상태는 같은 데이터가 아닙니다. `INVENTORY_SYNC_RUN`은 요청 하나의 생명주기를, `INVENTORY_SYNC_RUN_SOURCE`는 그 실행 안에서 원천별 처리량을, `INVENTORY_SOURCE_STATE`는 원천의 마지막 성공 기준선을, `INVENTORY_SYNC_ERROR`는 실패한 행의 맥락을 기록합니다. 네 책임을 한 테이블에 넣으면 “실행이 실패했지만 원천 상태는 마지막 성공 버전으로 유지되는” 상황을 표현하기 어려워집니다.
+| 매핑 방식 | 장점 | 위험 또는 비용 | 이번 설계 |
+| --- | --- | --- | --- |
+| 이름·코드 자동 추측 | 초기 연결이 빠릅니다. | 이름이 비슷한 다른 SKU를 잘못 연결할 수 있습니다. | 재고 안전성을 위해 사용하지 않았습니다. |
+| 검증된 `MAPPED` 상태의 `ROW_MAP` | 연결 근거가 남고 재실행해도 같은 대상을 가리킵니다. | 새 상품이 생길 때 매핑을 먼저 등록해야 합니다. | 현재 선택입니다. |
+| 원천에 canonical ID를 직접 저장 | 조회가 단순해질 수 있습니다. | 원천 스키마가 서비스 내부 PK에 종속됩니다. | 원천 계약을 보존하기 위해 선택하지 않았습니다. |
+
+## 설계 9. 동기화 실행과 원천 상태를 별도 테이블로 나눴습니다
+
+매핑 대상이 정해졌으니 이제 여러 원천을 안전하게 실행하기 위한 상태를 기록합니다. 동기화가 한 번 실행되었다는 사실과 원천 current의 현재 상태는 같은 데이터가 아닙니다. `INVENTORY_SYNC_RUN`은 요청 하나의 생명주기를, `INVENTORY_SYNC_RUN_SOURCE`는 그 실행 안에서 원천별 처리량을, `INVENTORY_SOURCE_STATE`는 원천의 마지막 성공 기준선을, `INVENTORY_SYNC_ERROR`는 실패한 행의 맥락을 기록합니다. 네 책임을 한 테이블에 넣으면 “실행이 실패했지만 원천 상태는 마지막 성공 버전으로 유지되는” 상황을 표현하기 어려워집니다.
+
+여기서 `idempotency(멱등성)`는 같은 요청을 여러 번 받아도 결과가 한 번 적용된 것처럼 유지하는 성질입니다. `fencing_token`은 오래된 worker가 뒤늦게 돌아와 최신 worker의 결과를 덮어쓰지 못하도록 실행 세대를 구분하는 값입니다. 둘 다 “재시도할 수 있는 동기화”를 만들기 위한 장치이며, 단순히 테이블을 나눈 것과는 다른 운영 안전장치입니다.
 
 | 테이블 | 대표 컬럼 | 왜 필요한가 |
 | --- | --- | --- |
 | `INVENTORY_SYNC_RUN` | `client_request_id`, `request_hash`, `run_status`, `current_phase`, `fencing_token`, `read_count`, `changed_count`, `error_count` | 중복 요청을 멱등하게 묶고, 실행 전체의 상태와 통계를 남깁니다. |
-| `INVENTORY_SYNC_RUN_SOURCE` | `source_type`, `start_version`, `end_version`, `start_checksum`, `end_checksum`, `source_status` | 같은 실행 안에서도 원천별 시작·종료 기준과 결과를 분리합니다. |
+| `INVENTORY_SYNC_RUN_SOURCE` | `source_type`, `start_version`, `end_version`, `source_status` | 같은 실행 안에서도 원천별 시작·종료 버전과 결과를 분리합니다. `start_checksum`, `end_checksum`은 스키마에 준비되어 있지만 현재 mapper가 실제로 기록하는 범위와는 구분해서 봐야 합니다. |
 | `INVENTORY_SOURCE_STATE` | `current_version`, `last_verified_checksum`, `last_success_sync_run_id`, `last_success_synced_at` | 다음 실행이 비교할 원천별 기준선을 보관합니다. |
-| `INVENTORY_SYNC_ERROR` | `source_record_key`, `error_phase`, `field_name`, `error_code`, `error_message` | 한 행의 어떤 필드가 projection·mapping·publish 중 실패했는지 기록합니다. |
+| `INVENTORY_SYNC_ERROR` | `source_type`, `error_phase`, `error_code`, `error_message` | 현재 실행 경로에서 원천·단계·오류 내용을 기록합니다. `source_record_key`, `field_name`은 행·필드 단위 오류를 확장할 수 있도록 nullable로 준비된 컬럼입니다. |
 
 <div className="not-prose my-10">
   <figure>
@@ -347,61 +479,19 @@ source_type + source_record_key
 </figure>
 </div>
 
-## 초기 fixture는 운영 기능과 분리합니다
+## 설계 10. 변경 후보와 실제 반영을 분리했습니다
 
-이 부분은 혼동하기 쉬워서 따로 강조합니다. `dummy-data/scripts/generate_inventory_source_current.mjs`는 운영 중 원천을 읽는 worker가 아니라 **승인된 snapshot을 원천 current 모양으로 만드는 generator**입니다.
+실행 상태를 만들었으니 이제 “무엇이 바뀌었는가”와 “실제로 무엇을 바꿀 것인가”를 분리합니다. `hash` 비교는 “바뀌었을 가능성이 있는 행”을 줄이는 1차 필터입니다. `record_hash`와 `synced_record_hash`가 같으면 같은 값을 이미 반영한 것으로 보고 건너뛰고, 다르면 공통 record 검증과 canonical 비교를 진행합니다. 이때 `no-op`은 오류가 아니라, 비교한 결과 실제로 바꿀 값이 없어 의도적으로 아무 작업도 하지 않는 상태를 뜻합니다.
 
-방향은 런타임과 반대입니다.
+Oracle `MERGE`는 `WHEN NOT MATCHED` 절을 포함할 때 조건에 맞는 행이 없으면 새 행을 삽입할 수 있고, `WHEN MATCHED` 절로 기존 행을 갱신할 수 있는 SQL입니다. 이 프로젝트의 generator seed SQL은 source key 기준으로 두 절을 모두 사용하지만, runtime canonical publish SQL은 row map이 가리키는 기존 canonical ID를 `WHEN MATCHED`에서 갱신하는 용도이며 canonical 행을 자동 생성하지 않습니다. 어떤 행을 바꿀지는 앞 단계의 `ROW_MAP`과 typed record 검증이 먼저 결정합니다.
 
-```text
-fixture 생성: canonical snapshot → source current
-실제 sync:    source current → CanonicalInventoryRecord → canonical
-```
+| 반영 전략 | 장점 | 단점 | 이번 설계 |
+| --- | --- | --- | --- |
+| 매번 전체 재적재 | 흐름이 단순하고 누락 확인이 쉽습니다. | 변경이 없어도 모든 행을 읽고 잠글 수 있습니다. | 초기 기준선 이후에는 선택하지 않았습니다. |
+| hash가 다른 행만 처리 | 같은 값의 반복 반영을 줄입니다. | hash 생성 규칙이 바뀌면 재검증이 필요합니다. | 변경 후보를 줄이는 기준으로 선택했습니다. |
+| 변경 이벤트만 처리 | 변경량이 작을 때 효율적입니다. | 이벤트 유실·순서 뒤바뀜·재처리 설계를 추가해야 합니다. | 현재 원천 계약에서 이벤트를 전제로 하지 않아 선택하지 않았습니다. |
 
-generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `canonical_sku_cost_current.csv`, `canonical_lot_current.csv`, `canonical_inventory_policy_current.csv`, `canonical_inventory_balance_current.csv` 여섯 snapshot을 읽습니다. `baseline_manifest.json`의 행 수와 checksum이 맞지 않으면 생성하지 않습니다.
-
-각 `INVENTORY_BALANCE` 행은 `allocated_sales_point_code` 기준으로 정확히 하나의 원천에 배치합니다.
-
-| 조건 | 생성되는 원천 |
-| --- | --- |
-| `MODU_MATJIP` | `ECOMMERCE` |
-| `GREETING` | `GREETING` |
-| `HMART_` 또는 `DEPT_` 접두사 | `OFFLINE` |
-| 할당 판매처 없음 | `WAREHOUSE` |
-| 알 수 없는 판매처 | 생성 실패 |
-
-이 규칙은 같은 balance를 채널 원천과 물류센터 원천에 동시에 복제하지 않게 합니다. 현재 승인 fixture 기준으로 `OFFLINE 23,392`, `ECOMMERCE 325`, `GREETING 1,416`, `WAREHOUSE 8,225`, 합계 `33,358`행이며 row map도 `33,358`건입니다.
-
-<div className="not-prose my-10">
-  <div className="mb-4" aria-label="초기 fixture">
-    <div>
-      <p className="text-sm font-bold tracking-wide text-[#7054b9]">초기 fixture</p>
-      <p className="text-sm text-foreground/60">승인된 canonical snapshot에서 원천 입력을 만듭니다.</p>
-    </div>
-  </div>
-  <figure>
-  <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
-    <img
-      src="/images/blog/inventory-source-lifecycle-ai.png"
-      alt="canonical snapshot 여섯 개를 generator가 키 기반으로 조인하고 원천 current 네 종류, row map, generation manifest, MERGE loader를 만드는 초기 fixture 생성 흐름"
-      className="h-auto w-full"
-    />
-  </div>
-  <figcaption>초기 fixture는 운영 sync의 입력을 만드는 별도 경로입니다. 생성 결과에는 source current, row map, manifest가 함께 남습니다.</figcaption>
-</figure>
-</div>
-
-generator는 원천별 serializer로 같은 값을 다른 컬럼명으로 표현합니다.
-
-```text
-canonical on_hand_qty = 10
-  → OFFLINE.available_stock_count = 10
-  → ECOMMERCE.sellable_quantity = 10
-  → GREETING.saleable_meal_count = 10
-  → WAREHOUSE.physical_available_qty = 10
-```
-
-생성 후에는 각 행의 `record_hash`, `row_version`, `fixture_generation_id`를 붙이고, source CSV·row map·generated SQL의 checksum과 row count를 `generation_manifest.json`에 기록합니다. 같은 입력을 다시 넣어도 같은 결과가 나오는지 `--verify`로 확인합니다.
+최종 publish는 hash만 믿고 끝내지 않습니다. target별 값 비교와 transaction 안에서 실제 변경을 수행합니다. `transaction`은 여러 DB 변경을 하나의 묶음으로 처리해, 중간에 오류가 나면 함께 되돌릴 수 있게 하는 단위입니다.
 
 <div className="not-prose my-10">
   <div className="mb-4" aria-label="변경 검증">
@@ -422,30 +512,38 @@ canonical on_hand_qty = 10
 </figure>
 </div>
 
-## 시연용 차감 테이블은 정식 정규화 경로와 분리합니다
+## 설계 11. 시연용 차감 테이블은 정식 정규화 경로와 분리했습니다
 
 ERD에서 `INVENTORY_DEMO_ADJUSTMENT`가 보이기 때문에 이 테이블이 원천 통합의 핵심이라고 오해하기 쉽습니다. V23 마이그레이션의 주석처럼 이 테이블은 **local/demo 전용 원천 차감 audit**이며, canonical 테이블을 직접 변경하지 않습니다. 기본 설정 `app.inventory-sync.demo-enabled=false`에서는 Controller 자체가 활성화되지 않습니다.
 
 시연에서 특정 원천 행의 수량을 20에서 15로 바꾸고 싶을 때는 요청 hash와 원천 행 버전을 함께 기록합니다. 서비스는 source state와 source row를 잠근 뒤 current 수량·row version·hash를 바꾸고, `INVENTORY_DEMO_ADJUSTMENT`에 요청자·적용 시각·변경 전후 값을 남깁니다. 이후 실제 sync가 이 current 변경을 읽어 canonical publish 대상으로 판단합니다. 이렇게 하면 “시연을 위한 입력 변화”와 “정식 업무 데이터 반영”의 transaction을 혼동하지 않습니다.
 
+원천 테이블의 수량만 직접 줄이는 방법도 기술적으로는 가능합니다. 하지만 일반 sync에서 `record_hash`와 `synced_record_hash`가 변경 후보를 결정하고, `INVENTORY_SOURCE_STATE.current_version`은 읽는 동안 원천 snapshot이 바뀌지 않았는지 확인하는 기준입니다. `row_version`은 원천 행의 버전과 demo audit/hash 계산에 사용되지만 일반 sync의 pending 필터 자체는 아닙니다. 수량만 바꾸고 hash나 version 계약을 갱신하지 않으면 변경을 놓치거나 일관성 검증을 통과하지 못할 수 있습니다. 그래서 현재 라이브 시연에서는 데모 API가 원천 수량·변경 기준·감사 이력을 한 transaction에서 함께 바꾸도록 구현했습니다. `INVENTORY_DEMO_ADJUSTMENT`를 삭제하고 같은 시연을 유지하려면, 중복 요청과 감사 이력을 다른 곳에 저장하도록 먼저 코드를 바꿔야 합니다.
+
 | 구분 | `INVENTORY_DEMO_ADJUSTMENT` | canonical 업무 테이블 |
 | --- | --- | --- |
 | 목적 | 시연·검증을 위한 원천 current 변화의 audit | 서비스가 제공하는 상품·재고·위험 결과 |
-| 변경 대상 | 네 source current와 `INVENTORY_SOURCE_STATE` | 승인된 row map으로 연결된 기존 업무 행 |
+| 변경 대상 | 네 source current와 `INVENTORY_SOURCE_STATE` | 검증된 row map으로 연결된 기존 업무 행 |
 | 안전장치 | `request_hash`, source row version 전후, rate limit, 중복 요청 방지 | typed record 검증, target 비교, publish transaction |
-| 운영 여부 | demo property가 켜진 로컬·검증 환경에서만 활성화 | 실제 동기화 경로의 정식 데이터 |
+| 운영 여부 | 기본값은 `false`이며 `app.inventory-sync.demo-enabled=true`인 환경에서만 Controller가 등록됩니다. 현재 local/demo에서만 켜도록 운영 설정으로 제한하지만 profile 자체를 코드가 강제하지는 않습니다. | 실제 동기화 경로의 정식 데이터 |
+
+| 원천 변경을 만드는 방법 | 장점 | 잃는 것 | 라이브 시연 판단 |
+| --- | --- | --- | --- |
+| 수량 컬럼만 직접 UPDATE | 빠르게 값을 바꿀 수 있습니다. | hash·version·상태·감사 이력이 어긋날 수 있습니다. | 현재 구조에서는 사용하지 않습니다. |
+| 수량과 변경 기준을 직접 UPDATE | 테이블 없이도 변경 후보를 만들 수 있습니다. | 멱등성·호출 제한·감사 이력을 별도로 구현해야 합니다. | 일회성 DB 실험에만 적합합니다. |
+| 데모 adjustment API | 원천 변경과 이력을 함께 처리하고 같은 요청을 재실행해도 중복 차감하지 않습니다. | 데모 전용 테이블과 설정을 유지해야 합니다. | 라이브 시연에는 이 방식을 사용합니다. |
 
 따라서 이 테이블은 전체 DB 도식에서는 보조 영역으로 표시하고, 원천을 canonical로 번역하는 핵심 설계와 섞어 설명하지 않습니다.
 
-## 왜 `MERGE`와 no-op 기준선을 사용했는가
+## 설계 12. 첫 동기화는 no-op 기준선으로 검증했습니다
 
 생성 SQL은 source record key를 기준으로 `MERGE`합니다. 같은 키가 있으면 값이 달라졌을 때만 갱신하고, 없으면 삽입합니다. 생성본에 없는 과거 generation 행은 물리 삭제하지 않고 논리 비활성화합니다. SQL 파일 자체에는 `COMMIT`을 넣지 않고 상위 seed entrypoint가 source current, row map, source state의 transaction 경계를 소유합니다.
 
-초기 fixture를 canonical snapshot에서 역으로 만들었기 때문에 첫 sync는 업무적으로 아무 것도 바꾸지 않아야 합니다. 문서에 기록된 Oracle 실행 13은 원천 `33,358`행을 읽고 canonical 변경 `0`, 오류 `0`으로 끝난 실행입니다. 이 `changed_count=0`은 실패가 아니라 “생성한 원천과 정식 기준선이 일치한다”는 검증 결과입니다.
+초기 fixture를 canonical snapshot에서 역으로 만들었기 때문에 첫 sync는 업무적으로 아무 것도 바꾸지 않아야 합니다. 현재 검증 fixture 기준으로 첫 sync는 원천 `33,358`행을 읽고 canonical 변경 `0`, 오류 `0`이 되는 것을 목표로 합니다. 이 `changed_count=0`은 실패가 아니라 “생성한 원천과 정식 기준선이 일치한다”는 검증 결과입니다.
 
 이 기준선이 있으면 이후 한 행의 수량을 바꾸었을 때 정말 변경된 행만 잡히는지 확인할 수 있습니다. 전체를 임의의 더미 값으로 채우고 첫 실행부터 대량 변경이 발생하면, generator가 틀린 것인지 publish가 틀린 것인지 분리하기 어려워집니다.
 
-## 선택지를 비교하며 남긴 설계 결정
+## 남은 선택지와 트레이드오프
 
 ### 공통 staging 테이블을 만들지 않은 이유
 
@@ -453,13 +551,13 @@ ERD에서 `INVENTORY_DEMO_ADJUSTMENT`가 보이기 때문에 이 테이블이 �
 
 ### 자동 fuzzy matching을 넣지 않은 이유
 
-상품명이나 SKU명을 기준으로 비슷한 행을 찾는 방법은 초기 데이터 생성량을 줄일 수 있습니다. 하지만 “비슷함”은 재고 데이터의 안전한 식별자가 아닙니다. 매핑이 틀리면 상품 속성뿐 아니라 LOT와 수량, 가격, 정책까지 함께 잘못 연결됩니다. 현재는 승인된 row map으로 범위를 제한하고, 신규 canonical row 자동 생성과 삭제 전파는 다음 설계 과제로 남깁니다.
+상품명이나 SKU명을 기준으로 비슷한 행을 찾는 방법은 초기 데이터 생성량을 줄일 수 있습니다. 하지만 “비슷함”은 재고 데이터의 안전한 식별자가 아닙니다. 매핑이 틀리면 상품 속성뿐 아니라 LOT와 수량, 가격, 정책까지 함께 잘못 연결됩니다. 현재는 검증된 `MAPPED` row map으로 범위를 제한하고, 신규 canonical row 자동 생성과 삭제 전파는 다음 설계 과제로 남깁니다.
 
 ### 전체 재적재 대신 changed-only 기준을 둔 이유
 
 매번 모든 canonical 행을 덮어쓰면 구현은 단순해도 변경량과 잠금 시간이 커집니다. 반대로 `record_hash`와 `synced_record_hash`가 다를 때만 buffer에 넣으면 같은 값은 건너뛸 수 있습니다. 다만 hash가 다르다고 canonical 값이 반드시 바뀌는 것은 아닙니다. 원천 전용 필드가 바뀌었거나 hash 사전이 확장된 경우도 있으므로, hash는 “검토할 후보”를 줄이는 기준이고 최종 publish는 target별 비교와 transaction이 담당합니다.
 
-## 한 행의 흐름을 시퀀스로 그리면
+## 한 행의 흐름을 다시 연결해 보면
 
 아래는 런타임에서 원천 한 행을 공통 형식으로 바꾸는 부분만 단순화한 흐름입니다. 초기 fixture 생성은 이 방향의 반대입니다.
 
@@ -476,23 +574,25 @@ PageMapper -> RowMap: source_record_key로 기존 PK 조인
 RowMap --> PageMapper: product / sku / lot / balance ID
 PageMapper -> Record: 공통 alias + 날짜·수량 타입 전달
 Record -> Record: 필수 ID·수량·상태 검증
-Record -> Buffer: sourceType 일치 여부 확인 후 추가
+Record -> Adapter: 검증된 record 전달
+Adapter -> Adapter: sourceType 확인
+Adapter -> Buffer: buffer.add(record)
 Buffer -> Target: changed record만 publish transaction에서 반영
 ```
 
 이 흐름에서 “하나로 합쳐졌다”는 말은 source current 테이블이 하나가 되었다는 뜻이 아닙니다. 같은 의미의 record가 잠시 하나의 메모리 경계에 모였다는 뜻입니다.
 
-## 이번 설계에서 남은 한계
+## 이 설계가 아직 해결하지 않는 문제
 
 현재 구조는 기존 canonical 행을 안전하게 갱신하는 데 초점을 맞춥니다. 그래서 원천에만 새로 등장한 상품을 자동으로 `PRODUCT`나 `SKU`로 만들지 않고, canonical row가 없으면 매핑 검증에서 멈춥니다. 원천 삭제를 canonical 삭제로 전파하는 기능도 같은 이유로 범위 밖입니다.
 
 또 하나의 경계는 hash 계약입니다. bootstrap generator는 source type별 필드 사전을 정규화해 SHA-256을 만들지만, demo 수량 조정 writer는 `sourceRecordKey | 변경 후 수량 | 다음 rowVersion`으로 변경 token을 만듭니다. 두 경로 모두 pending 행을 만드는 목적은 같지만 hash에 포함하는 값은 같지 않습니다. 운영 writer를 확장할 때 이 계약을 하나로 통일할지 결정해야 합니다.
 
-이 한계를 남기는 이유는 구현을 덜 해서가 아니라, 자동 생성·삭제까지 포함하면 “원천 데이터의 권위”와 “canonical의 생명주기”를 새로 결정해야 하기 때문입니다. 현재 단계에서는 승인된 기존 행만 변경하는 편이 데이터 안전성과 검증 가능성이 높습니다.
+이 한계를 남기는 이유는 구현을 덜 해서가 아니라, 자동 생성·삭제까지 포함하면 “원천 데이터의 권위”와 “canonical의 생명주기”를 새로 결정해야 하기 때문입니다. 현재 단계에서는 검증된 기존 행만 변경하는 편이 데이터 안전성과 검증 가능성이 높습니다.
 
 ## 마무리
 
-이번 원천 통합에서 선택한 핵심은 테이블을 줄이는 것이 아닙니다. 서로 다른 시스템의 current 계약을 보존하고, 서비스가 이해할 공통 의미를 별도의 typed record로 정의한 뒤, 승인된 row map과 hash 기준으로 기존 canonical 행에 반영하는 경계를 정하는 일입니다.
+이번 원천 통합에서 선택한 핵심은 테이블을 줄이는 것이 아닙니다. 서로 다른 시스템의 current 계약을 보존하고, 서비스가 이해할 공통 의미를 별도의 typed record로 정의한 뒤, 검증된 `MAPPED` row map과 hash 기준으로 기존 canonical 행에 반영하는 경계를 정하는 일입니다.
 
 정리하면 다음 구조입니다.
 
@@ -500,10 +600,36 @@ Buffer -> Target: changed record만 publish transaction에서 반영
 - `InventorySyncSourcePageMapper.xml`이 원천별 컬럼을 공통 alias와 타입으로 projection합니다.
 - `CanonicalInventoryRecord`가 ID·수량·상태의 최소 조건을 검사합니다.
 - `INVENTORY_SOURCE_ROW_MAP`이 원천 키와 canonical PK를 명시적으로 연결합니다.
-- generator는 승인된 canonical snapshot으로 fixture를 만들고, manifest·checksum·row map을 함께 남깁니다.
+- generator는 canonical snapshot·SKU mapping·raw fixture로 fixture를 만들고, manifest·checksum·row map을 함께 남깁니다.
 - 첫 sync가 `changed=0`이 되도록 round-trip 기준선을 만듭니다.
 
-이렇게 경계를 나누면 원천 시스템이 하나 더 늘어났을 때도 canonical 업무 로직 전체를 다시 쓰지 않고, 새 source current 계약·projection·adapter·mapping을 추가하는 방식으로 확장할 수 있습니다. 다음 글에서는 이 record가 `202 Accepted` 이후 실제 동기화 worker와 publish transaction을 어떻게 통과하는지 이어서 정리하겠습니다.
+이렇게 경계를 나누면 원천 시스템이 하나 더 늘어났을 때도 canonical 업무 로직 전체를 다시 쓰지 않고, 새 source current 계약·projection·adapter·mapping을 추가하는 방식으로 확장할 수 있습니다. 현재 매핑은 기준 snapshot과 deterministic generator 결과를 검증한 뒤 `MAPPED` 상태로 기록합니다. 다음 글에서는 이 record가 `202 Accepted` 이후 실제 동기화 worker와 publish transaction을 어떻게 통과하는지 이어서 정리하겠습니다.
+
+참고로 `202 Accepted`는 “요청을 받았고 처리할 작업으로 등록했다”는 응답입니다. 작업이 그 순간 모두 끝났다는 뜻은 아니므로, 다음 글에서는 실행 상태를 조회해 실제 성공 여부를 확인하는 과정까지 연결해 설명하겠습니다.
+
+## 기술·개념 용어집
+
+본문을 다시 볼 때 필요한 용어만 짧게 정리했습니다. 용어를 외우기보다 “어느 단계의 문제를 해결하는가”를 함께 보시면 됩니다.
+
+| 용어 | 간단한 설명 | 이 기능에서의 역할 |
+| --- | --- | --- |
+| ERD | 테이블과 테이블 사이의 연결 관계를 그림으로 표현한 설계도입니다. | 상품·SKU·LOT·재고·원천 매핑의 관계를 확인합니다. |
+| SQL projection | `SELECT`에서 컬럼 이름·타입·값을 공통 의미로 바꿔 보여주는 방식입니다. | 네 원천의 서로 다른 컬럼명을 공통 record 필드로 맞춥니다. |
+| MyBatis | Java 메서드와 XML SQL을 연결하는 persistence 도구입니다. | 원천별 조회와 canonical 반영 SQL을 mapper로 관리합니다. |
+| Java record | 관련 필드를 한 묶음으로 전달하고 생성 시 검증할 수 있는 데이터 구조입니다. | `CanonicalInventoryRecord`가 검증된 한 행을 표현합니다. |
+| Adapter | 외부 형식과 내부 형식 사이의 경계를 담당하는 코드입니다. | 원천 종류가 맞는지 확인하고 공통 buffer로 전달합니다. |
+| PK / FK | PK는 한 행의 고유 ID이고, FK는 다른 테이블의 PK를 가리키는 값입니다. | 원천 행을 기존 상품·SKU·재고 행과 연결합니다. |
+| Snapshot | 특정 시점의 기준 데이터를 고정해둔 복사본입니다. | fixture를 매번 같은 출발점에서 생성합니다. |
+| Fixture | 개발·테스트용으로 반복 생성할 수 있는 초기 데이터입니다. | 운영 데이터와 분리된 원천 current를 만듭니다. |
+| Hash | 데이터를 일정한 규칙으로 요약한 문자열입니다. | 원천 행이 이전 sync 이후 바뀌었는지 찾습니다. |
+| Checksum | 파일·데이터가 기준본과 같은지 확인하는 요약값입니다. | snapshot과 생성 산출물의 변경을 감지합니다. |
+| No-op | 처리할 값이 없어 의도적으로 아무것도 바꾸지 않는 결과입니다. | 첫 sync의 `changed=0`을 정상 기준선으로 확인합니다. |
+| `MERGE` | `WHEN MATCHED`로 기존 행을 갱신하고 `WHEN NOT MATCHED`를 포함하면 새 행도 삽입할 수 있는 SQL입니다. | generator는 upsert에 사용하고, runtime canonical publish는 기존 canonical ID 갱신에 사용합니다. |
+| Transaction | 여러 DB 변경을 하나의 묶음으로 처리하는 단위입니다. | 현재는 최종 publish transaction 안의 canonical·source 상태 변경을 함께 commit하며, 오류가 나면 그 묶음이 rollback됩니다. 실행 실패 기록은 별도 control transaction으로 남깁니다. |
+| Idempotency | 같은 요청을 여러 번 받아도 결과가 중복 적용되지 않는 성질입니다. | sync 요청과 데모 차감 요청의 중복 실행을 막습니다. |
+| Fail-closed | 문제가 있으면 추측해서 진행하지 않고 안전하게 멈추는 방식입니다. | 검증되지 않은 매핑의 publish를 막습니다. |
+| Fuzzy matching | 이름이 비슷한 값을 찾아 연결하는 방식입니다. | 빠르지만 잘못된 SKU를 연결할 수 있어 사용하지 않았습니다. |
+| Lineage | 결과가 어떤 입력·실행에서 만들어졌는지 추적하는 정보입니다. | 위험 평가와 sync run의 연결을 남깁니다. |
 
 ## 프로젝트 근거 자료
 
@@ -516,8 +642,8 @@ Buffer -> Target: changed record만 publish transaction에서 반영
 - `docs/plans/2026-08-20-002-feat-source-normalization-sync-plan.md`
 - `docs/plans/2026-08-22-001-feat-integrated-inventory-closeout-plan.md`
 - `BackEnd/docs/erd/통합재고조회-흐름배치-한글-snapshot.json`
-- `BackEnd/docs/erd/flyway-v24-full-schema-mermaid.md`
-- `docs/integrated-inventory/FLYWAY-SCHEMA-CATALOG.md`
+- `BackEnd/docs/erd/` (버전별 전체 스키마 도식)
+- `docs/integrated-inventory/` (통합재고 스키마 카탈로그)
 
 ### 실제 구현 경로
 
