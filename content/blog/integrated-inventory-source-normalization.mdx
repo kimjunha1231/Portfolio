@@ -6,7 +6,7 @@ published: true
 section: "개발 기록"
 category: "Data Architecture / Inventory"
 tags: ["통합재고", "Data Modeling", "Canonical Model", "Adapter", "MyBatis", "Oracle", "Fixture", "ETL"]
-cover: "/images/blog/integrated-inventory-source-to-canonical-light.svg"
+cover: "/images/blog/integrated-inventory-source-to-canonical-ai.png"
 coverAlt: "밝은 배경에서 오프라인, 이커머스, 그리팅, 물류센터 재고가 공통 번역기와 검증·매핑을 거쳐 canonical 테이블로 연결되는 설명 도식"
 coverFit: "contain"
 description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않고 공통 메모리 형식으로 정규화한 과정과, canonical snapshot 기반 fixture·row map·hash 설계를 정리합니다."
@@ -43,7 +43,7 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/integrated-inventory-source-to-canonical-light.svg"
+      src="/images/blog/integrated-inventory-source-to-canonical-ai.png"
       alt="네 가지 원천 재고가 공통 번역기와 검증·매핑을 거쳐 PRODUCT, SKU, 가격, LOT, 정책, 재고 테이블로 연결되는 밝은 설명 도식"
       className="h-auto w-full object-contain"
     />
@@ -102,7 +102,7 @@ description: "서로 다른 원천 재고 4종을 물리적으로 합치지 않�
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/inventory-source-layers-light.svg"
+      src="/images/blog/inventory-source-layers-ai.png"
       alt="승인된 canonical snapshot에서 원천 current 네 종류, row map, CanonicalInventoryRecord, canonical 업무 테이블로 이어지는 데이터 계층과 실행 메타데이터의 관계"
       className="h-auto w-full"
     />
@@ -201,7 +201,7 @@ public record CanonicalInventoryRecord(
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/inventory-source-projection-light.svg"
+      src="/images/blog/inventory-source-projection-ai.png"
       alt="OFFLINE, ECOMMERCE, GREETING, WAREHOUSE의 서로 다른 컬럼을 SQL projection이 공통 alias로 바꾸고 CanonicalInventoryRecord가 수량과 ID를 검증하는 흐름"
       className="h-auto w-full"
     />
@@ -239,7 +239,7 @@ source_type + source_record_key
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/inventory-row-map-bridge-light.svg"
+      src="/images/blog/inventory-row-map-bridge-ai.png"
       alt="source_record_key를 INVENTORY_SOURCE_ROW_MAP이 product, SKU, 판매처, 센터, LOT, inventory balance의 canonical PK와 연결하고 매핑 실패는 publish를 중단하는 흐름"
       className="h-auto w-full"
     />
@@ -286,7 +286,7 @@ generator는 `canonical_master_current.csv`, `canonical_price_current.csv`, `can
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/inventory-source-lifecycle-light.svg"
+      src="/images/blog/inventory-source-lifecycle-ai.png"
       alt="canonical snapshot 여섯 개를 generator가 키 기반으로 조인하고 원천 current 네 종류, row map, generation manifest, MERGE loader를 만드는 초기 fixture 생성 흐름"
       className="h-auto w-full"
     />
@@ -318,7 +318,7 @@ canonical on_hand_qty = 10
   <figure>
   <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
     <img
-      src="/images/blog/inventory-hash-noop-light.svg"
+      src="/images/blog/inventory-hash-noop-ai.png"
       alt="record_hash와 synced_record_hash를 비교해 변경된 행만 buffer와 MERGE로 보내고 같은 값이면 건너뛰어 첫 동기화 changed count 0을 확인하는 흐름"
       className="h-auto w-full"
     />
