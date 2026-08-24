@@ -1,801 +1,252 @@
 ---
 title: "통합재고 동기화는 버튼 하나로 끝나지 않는다: Frontend·Spring Boot·Oracle·Batch 설계"
 date: "2026-08-23"
-lastModified: "2026-08-23"
+lastModified: "2026-08-24"
 published: true
 section: "개발 기록"
 category: "System Design / Inventory"
-tags: ["통합재고", "TanStack Query", "Spring Boot", "Spring Batch", "Oracle", "비관적 락", "SSE"]
+tags: ["통합재고", "TanStack Query", "Spring Boot", "Spring Batch", "Oracle", "비관적 락", "멱등성"]
 cover: "/images/blog/integrated-inventory-sync-architecture-ai.png"
-coverAlt: "브라우저의 TanStack Query에서 Spring Boot API와 Oracle Guard, Spring Batch, 대시보드·통계 스냅샷을 거쳐 Ready 상태로 돌아오는 통합재고 동기화 흐름"
+coverAlt: "통합재고 동기화 요청이 실행권 확인, 원천 데이터 처리, 위험 판정, 화면 갱신으로 이어지는 전체 흐름"
 coverFit: "contain"
-description: "재고 동기화 버튼을 누른 뒤 브라우저 캐시, Spring Boot API, Oracle 비관적 락·DB guard, Spring Batch와 독립 스냅샷이 어떤 순서로 동작하는지 구현 경계와 트레이드오프로 정리합니다."
+description: "재고 동기화 버튼을 누른 뒤 중복 실행을 막고, 네 원천을 나누어 읽고, 정식 재고와 위험 판정을 함께 반영한 뒤 화면을 갱신하는 설계와 트레이드오프를 설명합니다."
 ---
 
-통합재고 동기화의 핵심은 화면 버튼이 아니라 실행권·멱등성·publish transaction의 경계입니다. 현재 core 동기화는 중복 실행과 stale worker를 제어하고, 대시보드·통계 snapshot은 in-memory best-effort라는 별도 lifecycle을 가집니다. durable task와 generation을 도입하면 서버 재시작 이후 snapshot 복구와 결과 세대 추적까지 확장할 수 있습니다.
+통합재고 화면의 동기화 버튼은 단순한 새로고침 버튼이 아니다. 버튼을 누르면 서버는 네 종류의 원천 데이터를 읽고, 서로 다른 표현을 하나의 형식으로 맞춘 뒤, 정식 재고와 위험 판정 결과를 함께 갱신한다. 도중에 같은 요청이 다시 들어오거나 서버가 멈추더라도 이전 작업이 새 결과를 덮어써서는 안 된다.
 
-아래 코드 예시는 별도의 의사코드가 아니라 현재 `FrontEnd`, `BackEnd`, `dummy-data` 저장소에서 실제로 사용하는 구간을 발췌한 것입니다. 따라서 문서에 등장하는 컬럼명과 상태값은 설계 후보가 아니라 현재 migration·Mapper·서비스 코드의 이름을 기준으로 적었습니다. 아직 구현하지 않은 generation·ETag·SSE·durable task는 각 절에서 명확히 “후속 설계”로 구분합니다.
+이 글은 특정 클래스 이름이나 설정값을 나열하기보다, **어떤 문제를 어떤 기술과 설계로 해결했는지**에 초점을 맞춘다. 예를 들어 “한 번에 500건을 처리한다”는 사실만 적는 대신, 그 숫자가 전체 작업량을 뜻하는지, 데이터베이스를 한 번에 읽고 쓰는 묶음의 크기를 뜻하는지, 실패 시 어디까지 되돌아가는지를 구분해 설명한다.
 
-이번 글에서는 한 번의 동기화 요청을 **브라우저 → Spring Boot API → Oracle → Spring Batch → 대시보드·통계 스냅샷 → 브라우저 캐시** 순서로 분해하고, 각 경계의 책임과 선택 이유를 정리합니다.
+핵심은 데이터베이스가 실행권을 지키고, 백그라운드 작업이 원천 데이터를 나누어 읽어 정식 재고와 위험 판정을 함께 확정하는 데 있다. 대시보드와 통계는 그 뒤 별도로 만들며, 오래된 작업은 작업 세대를 확인해 쓰기를 막는다.
 
-앞선 글에서는 서로 다른 네 원천 재고를 공통 `CanonicalInventoryRecord`로 번역하고 기존 업무 데이터와 매핑하는 방법을 다뤘습니다. 이번 글은 그 record가 실제 실행 버튼을 누른 뒤 어떤 보호 장치와 비동기 작업을 거치는지에 대한 후속 기록입니다.
+## 이 글에서 답하는 질문
 
-## 실행 단위와 데이터 단위
+- 버튼을 비활성화했는데도 데이터베이스 잠금이 필요한 이유는 무엇인가?
+- 왜 서버는 동기화가 끝날 때까지 기다리지 않고 “요청을 접수했다”고 먼저 응답하는가?
+- 한 번에 500건씩 읽고 쓴다는 말은 500건마다 저장을 확정한다는 뜻인가?
+- 서버가 중간에 멈췄다가 다시 살아났을 때, 오래된 작업을 어떻게 구분하는가?
+- 정식 재고, 위험 판정, 대시보드 중 어디까지 완료되어야 “동기화 성공”인가?
 
-이 글에서 반복해서 사용하는 실행 단위와 데이터 단위는 다음과 같습니다.
+## 한 번의 동기화는 어떤 순서로 진행되는가
 
-| 용어 | 이 글에서의 뜻 |
+전체 흐름을 사람의 말로 풀면 다음과 같다.
+
+**사용자 요청 → 실행권 확인 → 백그라운드 작업 등록 → 원천 검증·읽기 → 공통 형식으로 변환 → 정식 재고와 위험 판정 반영 → 대시보드·통계 스냅샷 생성 → 화면 갱신**
+
+| 단계 | 무엇을 하는가 | 실패했을 때의 원칙 |
+| --- | --- | --- |
+| 요청 접수 | 같은 요청인지, 이미 실행 중인 작업이 있는지 확인한다. | 중복 요청은 새 작업을 만들지 않고 기존 결과와 연결한다. |
+| 작업 등록 | 데이터베이스에 실행 기록을 먼저 남긴다. | 등록이 확정되지 않으면 백그라운드 작업도 시작하지 않는다. |
+| 원천 검증·읽기 | 네 원천의 연결 상태를 먼저 확인한 뒤 정해진 순서와 크기로 나누어 읽는다. | 읽는 동안 원천 버전이 바뀌면 전체 시도를 중단한다. |
+| 공통 형식과 의미 검증 | 서로 다른 컬럼과 상태값을 공통 의미로 바꾸고, 수량·연결 관계를 검사한다. | 일부만 건너뛰지 않고 전체 시도를 실패시킨다. |
+| 핵심 반영 | 정식 재고와 위험 판정 결과를 같은 업무 트랜잭션에서 저장한다. | 하나라도 실패하면 둘 다 되돌린다. |
+| 후속 집계 | 확정된 결과를 바탕으로 대시보드와 통계 스냅샷을 만든다. | 핵심 반영은 유지하고, 실패한 후속 집계는 별도 오류로 남긴다. |
+| 화면 갱신 | 실행 상태를 확인하다가 완료되면 관련 조회 결과를 다시 불러온다. | 통신 오류가 나도 서버 작업 자체는 계속된다. |
+
+동기화 성공의 기준은 **정식 재고와 위험 판정까지 확정되는 시점**이다. 대시보드와 통계는 이 결과를 보기 좋게 집계해 특정 시점의 값으로 저장한 후속 스냅샷이다. 따라서 핵심 반영은 성공했지만 후속 집계가 늦어지는 짧은 시간 동안, 상세 재고는 최신인데 대시보드는 직전 스냅샷을 보여 줄 수 있다.
+
+## 버튼 비활성화는 동시성 제어가 아니다
+
+화면은 실행 중일 때 버튼을 비활성화한다. 사용자 경험에는 필요하지만, 이것만으로 중복 실행을 막을 수는 없다.
+
+- 사용자가 브라우저 탭을 두 개 열 수 있다.
+- 네트워크 지연 때문에 같은 요청이 다시 전송될 수 있다.
+- 화면을 거치지 않고 서버의 접수 주소를 직접 호출할 수 있다.
+- 서로 다른 서버 인스턴스가 같은 순간에 요청을 받을 수 있다.
+
+그래서 서버는 세 겹으로 실행권을 지킨다.
+
+### 1. 같은 요청을 알아보는 식별자
+
+화면은 요청마다 고유한 식별자를 만든다. 같은 식별자로 재요청이 오면 서버는 새 작업을 추가하지 않고, 이미 만든 실행 기록을 돌려준다. 이런 성질을 **멱등성**이라고 한다. 같은 요청을 여러 번 보내도 업무 결과는 한 번 보낸 것과 같게 만드는 방식이다.
+
+멱등성은 “같은 요청의 재전송”을 다룬다. 서로 다른 식별자로 동시에 들어온 두 요청까지 막아 주지는 않는다.
+
+### 2. 데이터베이스의 짧은 행 잠금
+
+실행권을 결정하는 짧은 구간에서는 Oracle의 **비관적 락**을 사용한다. 비관적 락은 “다른 요청도 동시에 들어올 수 있다”고 가정하고, 한 요청이 실행 상태를 확인하고 기록을 만드는 동안 같은 실행권 행을 다른 요청이 바꾸지 못하게 하는 방식이다.
+
+잠금은 동기화가 끝날 때까지 유지하지 않는다. 실행 가능 여부를 판단하고 실행 기록을 만든 뒤 바로 놓는다. 잠금을 기다리는 최대 시간도 5초로 제한했다. 그 안에 실행권을 얻지 못하면 서버는 무작정 대기하지 않고, 이미 다른 요청이 처리 중이라는 충돌 응답을 보낸다.
+
+이렇게 범위를 좁힌 이유는 분명하다. 긴 작업 전체에 잠금을 걸면 중복 실행은 막기 쉽지만, 장애가 났을 때 다른 요청까지 오래 붙잡고 데이터베이스 연결도 낭비한다.
+
+### 3. 데이터베이스의 유일성 제약
+
+애플리케이션 검사가 예상치 못한 경쟁 조건을 놓치더라도, 데이터베이스가 동시에 활성 상태인 실행 기록이 둘 생기지 않도록 마지막 방어선을 둔다. 화면 확인, 서버 잠금, 데이터베이스 제약은 같은 일을 중복하는 것이 아니라 서로 다른 실패 지점을 막는다.
+
+| 선택지 | 장점 | 이 구조에서의 한계 |
+| --- | --- | --- |
+| 서버 메모리 잠금 | 구현이 단순하고 빠르다. | 서버가 여러 대면 각자 다른 잠금을 보게 된다. 재시작하면 상태도 사라진다. |
+| Redis 분산 잠금 | 여러 서버가 빠르게 공유할 수 있다. | 별도 인프라와 만료·장애 정책을 운영해야 한다. |
+| Oracle 행 잠금 | 실행 이력과 같은 저장소에서 트랜잭션으로 관리할 수 있다. | 잠금 범위와 대기 시간을 잘못 잡으면 데이터베이스 경합이 커진다. |
+| 낙관적 락 | 충돌이 드물 때 잠금 대기가 적다. | 실행 시작처럼 충돌 자체를 먼저 막아야 하는 구간에서는 재시도 설계가 복잡해진다. |
+
+이 프로젝트에서는 실행 이력이 이미 Oracle에 있고 실행 시작 경쟁도 같은 트랜잭션 안에서 판단해야 했기 때문에, **짧은 Oracle 행 잠금과 유일성 제약**을 선택했다.
+
+## 오래 걸리는 작업은 웹 요청에서 분리한다
+
+네 원천을 읽고 검증한 뒤 여러 테이블을 갱신하는 작업은 몇 초 이상 걸릴 수 있다. 웹 요청을 그 시간 내내 열어 두면 다음 문제가 생긴다.
+
+- 브라우저나 중간 장비의 시간 제한에 걸릴 수 있다.
+- 사용자는 응답이 없는 화면을 보며 다시 버튼을 누르기 쉽다.
+- 서버의 웹 요청 처리 자원이 오래 점유된다.
+- 작업은 진행 중인데 네트워크만 끊겨 실패처럼 보일 수 있다.
+
+그래서 서버는 요청을 검증하고 실행 기록을 확정한 뒤 **HTTP 202 Accepted**, 즉 “작업을 접수했지만 아직 완료되지는 않았다”는 응답을 돌려준다. 화면은 이때 받은 실행 식별자로 진행 상태를 조회한다.
+
+실행 기록을 먼저 확정한 다음 백그라운드 작업을 시작한다. 데이터베이스 반영이 끝나기도 전에 작업을 시작하면, 백그라운드 작업이 존재하지 않는 실행 기록을 조회하는 경쟁 조건이 생길 수 있다. 현재 구조는 요청 트랜잭션이 끝난 뒤 Spring Batch 작업을 등록해 이 틈을 막는다.
+
+Spring Batch는 작업 실행 이력과 상태처럼, 중단된 작업의 재시작 여부를 판단하는 데 필요한 정보를 관리한다. 다만 Spring Batch를 쓴다고 해서 모든 업무가 자동으로 복구되는 것은 아니다. 어떤 상태를 다시 실행해도 안전한지, 오래 멈춘 작업을 누가 발견할지, 업무 데이터와 실행 이력을 어디까지 함께 되돌릴지는 애플리케이션이 정해야 한다.
+
+현재는 동시에 등록할 수 있는 백그라운드 작업 수를 제한해 요청이 몰릴 때 서버 스레드가 무한히 늘어나지 않도록 했다. 큐가 가득 차면 “접수는 되었는데 언젠가 실행되겠지”라고 숨기지 않고, 실행 시작 실패 상태를 명시적으로 기록한다.
+
+## 한 번에 최대 500행씩 읽는 이유
+
+원천 데이터가 많다고 해서 한 번의 데이터베이스 조회로 전부 가져오지는 않는다. 현재는 원천별로 최대 500행씩 읽고, 정식 테이블에 쓸 때도 최대 500행 단위로 SQL 요청을 나눈다.
+
+500은 한 번의 데이터베이스 읽기와 쓰기 요청에 포함하는 최대 행 수다. 전체 동기화 건수나 저장 확정 단위는 아니다. 500행을 넘으면 다음 묶음을 계속 처리하며, 500행마다 앞부분의 성공이 따로 남지는 않는다.
+
+읽기는 마지막으로 확인한 안정적인 키 다음부터 이어 가는 **키셋 페이지네이션**을 사용한다. 단순히 “몇 번째 묶음인지”로 이동하는 방식보다, 앞쪽 데이터가 추가되거나 삭제될 때 중복·누락이 생길 가능성을 줄일 수 있다.
+
+또한 한 시도 안에서는 원천 데이터의 버전을 고정한다. 읽는 도중 원천 버전이 바뀌면 “앞부분은 이전 버전, 뒷부분은 새 버전”인 혼합 결과를 만들지 않고 전체 시도를 중단한다. 운영자는 다시 실행해 한 버전의 일관된 결과를 얻는다.
+
+500이라는 크기는 절대적인 정답이 아니다. 너무 작으면 데이터베이스 왕복 횟수가 늘고, 너무 크면 한 번에 사용하는 메모리와 SQL 크기가 커진다. 현재 값은 데모 데이터 규모와 Oracle 요청 비용 사이의 운영 기준이며, 실제 운영에서는 처리 시간·메모리·데이터베이스 부하를 측정해 조정해야 한다.
+
+한 가지 한계도 있다. 조회 자체는 500행씩 하지만, 변경 후보 전체는 검증과 반영을 위해 메모리에 모은다. 현재는 최대 10만 건으로 상한을 두고 넘으면 실패시킨다. 즉, 페이지 조회가 곧 전체 메모리 사용량의 상한을 의미하지는 않는다. 데이터가 이 범위를 넘어가면 임시 적재 테이블이나 스트리밍 기반 구조로 옮겨야 한다.
+
+## 공통 형식화와 검증은 반영 전에 끝낸다
+
+네 원천은 같은 재고를 서로 다른 이름과 단위, 상태값으로 표현할 수 있다. 읽기 단계에서는 각 원천의 표현을 공통 의미로 번역한다.
+
+- 원천의 상품·SKU·창고·재고 식별자를 정식 데이터의 안정적인 식별자와 연결한다. SKU는 옵션과 용량까지 구분한 실제 판매·재고 관리 단위다.
+- 문자열이나 숫자로 흩어진 상태값을 공통 상태로 바꾼다.
+- 현재 보유 수량인 현재고, 예약 수량, 안전재고와 같은 생산·입고 조건의 재고 묶음인 LOT의 입고일·유통기한처럼 이후 계산에 필요한 값을 같은 의미로 맞춘다.
+- 어느 원천의 어느 행에서 왔는지 추적할 수 있는 출처 정보와 버전을 함께 보관한다.
+
+그다음 수량이 음수인지, 필수 연결이 빠졌는지, 같은 대상을 여러 원천이 서로 다르게 주장하는지 검사한다. 이 과정은 잘못된 행만 몰래 버리는 방식이 아니다. 정식 재고를 만들 수 없을 정도의 불일치가 하나라도 있으면 이번 시도 전체를 실패시킨다. 일부 성공을 허용하면 “어느 원천까지 반영되었는지”를 별도로 추적하고 복구해야 해 운영 복잡도가 크게 올라가기 때문이다.
+
+변경 후보를 빠르게 찾기 위해 내용의 지문인 **해시**를 사용한다. 이전에 성공적으로 반영한 지문과 같으면 우선 변경 없음으로 분류한다. 하지만 해시는 후보를 줄이는 도구일 뿐 최종 진실은 아니다. 정식 데이터와 실제 값을 다시 비교해 해시 충돌이나 지문 생성 규칙의 차이가 곧바로 잘못된 반영으로 이어지지 않게 한다.
+
+## 정식 재고와 위험 판정은 같은 트랜잭션에서 확정한다
+
+검증을 통과하면 정식 재고, LOT 정보, 재고 정책 등 기존에 연결된 대상을 갱신한다. 이 동기화는 새로운 상품이나 창고를 자동으로 생성하지 않는다. 검증된 기존 식별자를 기준으로 현재 값을 갱신하는 구조다.
+
+쓰기 요청은 데이터베이스 부담을 줄이기 위해 500행씩 나누지만, **500행마다 저장을 확정하지는 않는다.** 정식 재고 반영과 위험 판정 저장은 모두 성공해야 한꺼번에 확정되는 하나의 업무 묶음, 즉 트랜잭션으로 처리한다. 마지막 단계에서 오류가 나면 앞에서 갱신한 정식 재고도 함께 되돌아간다.
+
+원천 하나를 처리할 때 화면에는 데이터 검증, 원천 읽기, 공통 형식 변환이 차례로 보인다. 이 세 단계는 네 원천마다 반복된다. 모든 원천 처리가 끝나면 통합재고 반영과 위험 판정으로 넘어간다.
+
+내부 상태 코드를 그대로 노출하지 않고 사용자가 지금 무엇을 하는지 이해할 수 있는 말로 바꿨다. 대기, 실행 중, 완료뿐 아니라 원천 변경 감지로 중단, 중단 후 복구 대기, 실행 시작 실패도 구분한다.
+
+## 위험 판정도 이번 동기화의 결과로 저장한다
+
+위험 판정을 조회할 때마다 다시 계산하면, 같은 실행 결과를 보고도 조회 시점이나 참조 데이터 변화에 따라 등급이 달라질 수 있다. 현재는 동기화 시점에 위험 등급, 판정 이유, 재고 소진 예상 일수, 안전재고 미달 여부를 함께 저장한다. 상세 화면은 이 저장 결과를 기준으로 보여 준다.
+
+위험 판정의 주요 원칙은 다음과 같다.
+
+- 표시용 상품 코드가 아니라 내부의 안정적인 상품·창고 식별자로 영향 범위를 묶는다.
+- 영향 범위가 있는데 위험 결과가 하나도 만들어지지 않으면 핵심 동기화를 실패시킨다.
+- 수요 예측이 없거나 유효하지 않으면 예측이 필요한 규칙만 제외하고, 현재고·안전재고·LOT 정보로 판단 가능한 규칙은 계속 적용한다.
+- 유효하지만 오래된 예측은 계산에 사용하되, 판정 이유에 오래된 자료라는 사실을 남긴다.
+- LOT의 만료·임박 여부는 예측 기준일이 아니라 실제 위험 판정일을 기준으로 계산한다.
+- 현재고가 없으면 0으로 보고 가장 위험한 상태로 다루며, 음수 수량은 잘못된 입력으로 판단해 동기화 자체를 실패시킨다.
+- 안전재고가 없으면 해당 비교 규칙만 제외하고 그 사실을 판정 이유에 남긴다.
+
+이 설계는 “자료 하나가 없으면 무조건 안전”이라는 잘못된 결론을 피한다. 동시에 불완전한 예측 하나 때문에 현재고와 LOT로 알 수 있는 위험까지 모두 숨기지 않는다.
+
+현재 구현에는 검증 경계도 남아 있다. 위험 결과가 완전히 비는 경우는 막지만, 여러 영향 범위 각각에 결과가 정확히 하나씩 존재하는지를 별도 개수 검증으로 보장하지는 않는다. 이 부분은 데이터 범위가 더 복잡해질 때 강화할 지점이다.
+
+## 오래된 작업자는 새 결과를 덮어쓸 수 없다
+
+백그라운드 작업은 서버 장애나 일시적인 정지 때문에 예상보다 오래 멈출 수 있다. 일정 시간 동안 작업의 생존 신호가 없으면 운영자는 그 실행을 중단·복구 대기 상태로 바꾸고 새 시도를 시작할 수 있다.
+
+문제는 이전 작업이 뒤늦게 다시 움직이는 경우다. 상태만 “실행 중”인지 확인하면, 오래된 작업이 새 시도의 결과를 덮어쓸 수 있다.
+
+이를 막기 위해 실행마다 **작업 세대 번호**를 부여한다. 작업자는 읽기, 변환, 검증, 반영, 위험 판정처럼 중요한 단계로 넘어갈 때마다 자신이 여전히 현재 세대인지 확인한다. 새 시도가 시작되어 세대가 바뀌었다면 이전 작업의 상태 변경과 결과 확정을 거부한다. 분산 시스템에서는 이런 방식을 보통 **펜싱 토큰**이라고 부른다. 문을 잠그는 것에 그치지 않고, 오래된 열쇠로 들어온 작업의 쓰기까지 차단하는 장치다.
+
+현재 복구는 자동 감시기가 알아서 시작하는 방식이 아니라 운영자가 상태를 확인하고 수동으로 재시도하는 흐름이다. 작업 세대와 생존 신호는 안전한 재시도의 기반이지만, 자동 복구 정책 자체를 대신하지는 않는다.
+
+## 대시보드와 통계는 왜 별도 작업인가
+
+정식 재고와 위험 판정이 확정된 뒤에는 대시보드와 통계용 스냅샷을 만든다. 이 집계까지 핵심 트랜잭션에 넣으면 다음 문제가 생긴다.
+
+- 집계가 느릴수록 정식 재고 확정도 함께 늦어진다.
+- 통계 한 건의 실패 때문에 올바르게 만든 정식 재고와 위험 판정까지 되돌아간다.
+- 긴 트랜잭션이 데이터베이스 잠금과 로그 사용량을 키운다.
+
+그래서 현재는 핵심 트랜잭션이 끝난 뒤 대시보드와 통계를 동시에 실행할 개수를 제한한 별도의 작업 대기열에서 생성한다. 하나가 실패해도 다른 하나와 핵심 동기화 결과는 유지된다.
+
+대신 이 큐는 서버 메모리에 있다. 서버가 재시작하면 아직 처리하지 못한 후속 작업을 잃을 수 있다. 지금 구조는 핵심 데이터의 정합성을 우선한 선택이며, 대시보드 갱신까지 반드시 보장해야 하는 운영 단계에서는 데이터베이스 작업함, 메시지 큐, 정기 재생성 작업처럼 지속성 있는 후속 처리 장치가 필요하다.
+
+## 브라우저는 완료 상태를 어떻게 확인하는가
+
+화면은 작업 중일 때만 실행 상태를 주기적으로 확인한다.
+
+- 실행 대기 중에는 비교적 짧은 3초 간격으로 확인한다.
+- 실제 실행이 시작되면 10초 간격으로 확인해 불필요한 요청을 줄인다.
+- 완료, 실패, 중단처럼 끝난 상태가 되거나 화면이 백그라운드로 가면 반복 확인을 멈춘다.
+
+이 **폴링**은 진행 상황을 보여 주는 방법이지, 중복 실행을 막는 장치가 아니다. 중복 실행 방지는 앞에서 설명한 서버의 멱등성, 데이터베이스 잠금, 유일성 제약이 담당한다.
+
+성공을 확인하면 화면은 재고 목록, 요약, 상세, LOT, 위험 현황, 대시보드와 통계를 다시 조회한다. TanStack Query에서는 이를 캐시 무효화라고 한다. 데이터가 오래되었다고 판단하는 기준과 화면에서 더는 쓰지 않는 데이터를 메모리에서 지우는 기준은 서로 다르다. 둘을 같은 캐시 시간으로 이해하면 새로 고침 정책을 잘못 설계하기 쉽다.
+
+또 하나의 경계가 있다. 조회 결과를 다시 가져오게 만들었다고 해서, 비동기로 생성 중인 대시보드 스냅샷까지 그 순간 완성되었다는 뜻은 아니다. 핵심 재고는 최신인데 후속 스냅샷이 잠시 이전 세대일 수 있다는 사실을 화면과 운영 지표에서 구분해야 한다.
+
+## 현재 보장하는 것과 아직 보장하지 않는 것
+
+| 현재 보장하는 것 | 아직 남은 과제 |
 | --- | --- |
-| `syncRun` | 버튼 한 번으로 만들어진 동기화 실행 기록입니다. |
-| `task` | 하나의 실행에서 따로 끝날 수 있는 하위 작업입니다. |
-| `generation` | 어떤 데이터 묶음이 어느 시점의 결과인지 나타내는 세대 번호입니다. |
-| `lease` | worker가 아직 살아 있다는 것을 나타내는 만료 시각입니다. |
+| 같은 요청은 하나의 실행 결과로 묶인다. | 서버 재시작 뒤 후속 스냅샷 작업을 자동 복구하지는 않는다. |
+| 한 범위에서는 하나의 활성 동기화만 시작된다. | 오래 멈춘 실행을 자동으로 찾고 복구하는 감시기는 없다. |
+| 한 시도는 같은 원천 버전만 사용한다. | 새 상품·창고·원천 삭제를 자동으로 정식 데이터에 전파하지 않는다. |
+| 정식 재고와 위험 판정은 함께 확정되거나 함께 되돌아간다. | 전체 변경 후보를 메모리에 모으므로 매우 큰 규모에는 임시 적재 구조가 필요하다. |
+| 오래된 작업 세대는 새 결과를 덮어쓸 수 없다. | 폴링보다 정밀한 실시간 알림과 스냅샷 세대 표시는 추후 개선 대상이다. |
+| 화면에는 내부 상태 코드 대신 이해할 수 있는 한국어 상태를 표시한다. | 처리량, 잠금 대기, 후속 집계 지연을 운영 지표로 더 세분화할 필요가 있다. |
 
-`syncRun`과 `task`를 분리하는 이유는 core 동기화가 끝난 뒤에도 대시보드와 통계가 각자 계산될 수 있기 때문입니다. `generation`은 캐시를 언제 다시 읽을지 판단하는 기준이고, `lease`는 서버가 중단되었을 때 고아 작업을 찾아 복구하는 기준입니다.
+“정확히 한 번만 실행된다”는 표현은 의도적으로 쓰지 않았다. 네트워크와 장애가 있는 시스템에서 그 말은 지나치게 넓은 보장을 암시한다. 현재 구조가 실제로 보장하는 것은 **같은 요청을 하나로 묶고, 한 범위의 활성 작업을 제한하며, 오래된 작업의 쓰기를 거부하고, 핵심 결과를 모두 함께 확정하거나 함께 되돌리는 것**이다.
 
-## 설계 목표와 현재 코드의 경계
+## 핵심 트레이드오프 정리
 
-동기화의 전체 목표 흐름은 다음과 같습니다. 다만 `durable task`, `generation`, `ETag`, SSE는 현재 코드에 모두 들어간 기능이 아니라 설계 후보와 후속 작업을 포함합니다. 아래 단계에서 현재 적용 여부를 분리해 설명합니다.
-
-```text
-사용자가 동기화 버튼 클릭
-        ↓
-브라우저에서 clientRequestId 생성, 버튼을 잠시 비활성화
-        ↓
-POST /api/v1/inventory-sync-runs
-        ↓
-Oracle 짧은 제출 트랜잭션
-  ├─ 비관적 락으로 제출 순서 직렬화
-  ├─ active_scope_key UNIQUE로 진행 중 작업 1개 보장
-  └─ clientRequestId로 재전송 멱등성 보장
-        ↓
-202 Accepted 또는 409 Conflict
-        ↓
-커밋 후 Spring Batch core 동기화 실행
-  ├─ 원천 4종을 페이지 단위로 읽음
-  ├─ hash·version으로 변경 후보를 좁힘
-  ├─ 공통 record로 검증하고 buffer에 담음
-  └─ canonical 재고와 위험등급을 한 트랜잭션으로 publish
-        ↓
-현재: 커밋 후 in-memory snapshot coordinator가
-      dashboard/statistics 작업을 각각 실행
-후속 목표: 두 durable task를 DB에 저장하고
-      독립 실행·재시도·복구 상태를 영속화
-        ↓
-현재: 필요한 inventory query만 무효화
-후속 목표: generation과 snapshot-ready 상태로
-      대상 query를 더 정밀하게 무효화
-        ↓
-브라우저가 필요한 query만 무효화하고 다시 조회
-```
-
-여기서 “버튼이 잠겼다”는 것은 두 가지 의미로 나뉩니다.
-
-| 의미 | 담당 위치 | 실패해도 안전한가 |
+| 설계 선택 | 얻은 것 | 치른 비용 |
 | --- | --- | --- |
-| 클릭 직후 같은 브라우저에서 중복 클릭을 줄이는 시각적 잠금 | Frontend | 새로고침하면 사라지므로 보안 장치가 아닙니다. |
-| 여러 브라우저·여러 WAS가 동시에 실행하지 못하게 하는 실행권 | Oracle과 Backend | DB가 최종 판단하므로 서버가 여러 대여도 적용됩니다. |
+| 짧은 비관적 락과 유일성 제약 | 여러 서버에서도 실행 시작 경쟁을 막는다. | 잠금 대기 시간과 충돌 응답을 운영해야 한다. |
+| 접수 응답과 Spring Batch 분리 | 긴 작업이 웹 요청을 붙잡지 않는다. | 화면 상태 조회와 작업 복구 정책이 필요하다. |
+| 500행 단위 읽기·쓰기 | 한 번의 SQL과 메모리 급증을 줄인다. | 데이터베이스 왕복 횟수가 늘며, 크기를 튜닝해야 한다. |
+| 원천 버전 고정과 해시 비교 | 혼합 스냅샷을 막고 변경 후보를 빨리 찾는다. | 원천이 자주 바뀌면 시도가 실패할 수 있고 지문 규칙을 관리해야 한다. |
+| 핵심 업무 하나의 트랜잭션 | 정식 재고와 위험 판정의 불일치를 막는다. | 변경량이 커질수록 트랜잭션 시간과 메모리 부담이 커진다. |
+| 메모리 기반 후속 스냅샷 | 핵심 반영을 빠르게 끝내고 집계 실패를 격리한다. | 서버 재시작 시 미처리 작업을 잃을 수 있다. |
+| 위험 판정 결과 저장 | 같은 실행의 등급과 이유를 일관되게 설명한다. | 규칙 변경 뒤 과거 결과를 다시 계산하려면 별도 재평가가 필요하다. |
 
-따라서 모든 사용자 화면을 실시간으로 잠그는 것이 동시성 제어의 본체는 아닙니다. 화면은 현재 상태를 보여주는 관찰자이고, 실행 가능 여부는 서버가 `202`, `409`, `429` 같은 응답으로 결정합니다.
+## 자주 묻는 질문
 
-<div className="not-prose my-10">
-  <div className="mb-4" aria-label="통합 동기화 전체 흐름">
-    <div>
-      <p className="text-sm font-bold tracking-wide text-[#2f6fcb]">통합 동기화 전체 흐름</p>
-      <p className="text-sm text-foreground/60">화면의 버튼은 시작점이며, core publish와 snapshot은 서로 다른 완료 경계를 가집니다.</p>
-    </div>
-  </div>
-  <figure>
-    <div className="overflow-hidden rounded-2xl border border-card-border bg-white">
-      <img
-        src="/images/blog/integrated-inventory-sync-architecture-ai.png"
-        alt="TanStack Query 브라우저가 Spring Boot API, Oracle Guard, Spring Batch Core, 대시보드·통계 스냅샷을 거쳐 Ready 상태로 돌아오는 통합재고 동기화 흐름"
-        className="h-auto w-full object-contain"
-      />
-    </div>
-    <figcaption>동기화 요청과 완료 알림은 하나의 선으로 보이지만, core publish와 두 스냅샷 작업은 서로 다른 실행 단위입니다.</figcaption>
-  </figure>
-</div>
+### 데이터베이스 잠금은 동기화가 끝날 때까지 유지하나?
 
-## 이 문제를 성능 문제로만 보면 놓치는 것
+아니다. 실행 가능 여부를 확인하고 실행 기록을 만드는 짧은 구간에만 사용한다. 실제 원천 읽기와 반영은 작업 세대, 원천 버전, 업무 트랜잭션으로 보호한다.
 
-재고는 자주 바뀌기 때문에 최신 상태를 확인해야 합니다. 그렇다고 모든 브라우저가 3초마다 같은 API를 호출하면 사용자가 아무도 버튼을 누르지 않은 시간에도 요청과 DB 조회가 계속 발생합니다.
+### 한 번에 500행이면 전체 데이터가 500행을 넘을 수 없나?
 
-반대로 버튼을 누른 요청을 HTTP 요청 하나에서 끝까지 동기 처리하면, 작업이 오래 걸릴 때 브라우저 연결이 끊기거나 타임아웃이 발생합니다. 대시보드와 통계까지 같은 트랜잭션으로 묶으면 통계 계산이 느린 날에는 다음 동기화가 필요 이상으로 오래 기다려야 합니다.
+아니다. 500은 한 번의 읽기 또는 쓰기 요청 크기다. 다음 묶음을 계속 처리한다. 다만 변경 후보 전체를 메모리에 모으므로 현재는 별도의 10만 건 상한이 있다.
 
-그래서 해결해야 할 문제를 네 가지로 나눴습니다.
+### Spring Batch를 쓰면 실패한 작업이 자동으로 복구되나?
 
-| 문제 | 단순한 해결책이 실패하는 이유 | 이번 설계의 대응 |
-| --- | --- | --- |
-| 중복 실행 | 버튼 `disabled`는 다른 브라우저에 전달되지 않습니다. | Oracle 비관적 락과 DB unique guard를 함께 사용합니다. |
-| 긴 작업 | HTTP 요청을 끝까지 유지하면 타임아웃과 재시도 중복이 생깁니다. | `202 Accepted` 후 Spring Batch가 비동기로 처리합니다. |
-| 불필요한 조회 | 유휴 상태에서도 고정 주기 polling을 계속합니다. | 현재는 실행 중에만 adaptive polling을 적용하고, ETag는 후속 API 개선으로 남겼습니다. |
-| 서버 중단·부분 실패 | 메모리 큐만 쓰면 재시작 시 스냅샷 작업을 잃을 수 있습니다. | 현재는 bounded in-memory executor와 로그로 격리하고, DB durable task·lease·retry는 후속 설계입니다. |
+아니다. Spring Batch는 실행 상태와 재시작 기반을 제공한다. 어떤 작업을 언제 다시 실행할지, 재실행이 업무상 안전한지는 별도 정책과 구현이 필요하다. 현재는 수동 복구 흐름이다.
 
-여기서 **DB unique guard**는 같은 조건의 실행이 두 개 이상 저장되지 않도록 데이터베이스의 `UNIQUE` 제약으로 마지막 중복을 막는 안전장치입니다. 예를 들어 `active_scope_key`를 unique로 지정하면 여러 브라우저나 서버가 동시에 요청해도 `INVENTORY_CANONICAL`을 사용하는 활성 동기화는 하나만 저장할 수 있습니다. 화면의 버튼 비활성화나 애플리케이션 코드의 검사만으로는 막기 어려운 경합을 DB가 최종적으로 거부하는 방식입니다.
+### 수요 예측이 없으면 위험하지 않다고 판단하나?
 
-이 네 문제는 서로 연결되어 있지만 같은 기술 하나로 해결되지 않습니다. 락은 실행권을, 배치는 작업 실행을, 캐시는 조회 비용을, 알림은 화면 반응성을 담당하도록 경계를 나눴습니다.
+아니다. 예측이 필요한 규칙만 제외하고 현재고, 안전재고, LOT로 판단할 수 있는 위험은 계속 평가한다. 현재고 자체가 없으면 0으로 보아 가장 보수적으로 다룬다.
 
-## 1단계. 브라우저: 버튼을 누르기 전의 준비
+### 동기화 성공인데 대시보드가 잠시 이전 값일 수 있나?
 
-### 화면 캐시와 서버 상태를 분리했습니다
-
-통합재고 목록은 화면에서 잠깐 만든 값이 아니라 서버가 관리하는 상태입니다. 그래서 React 컴포넌트의 `useState`에 목록을 넣기보다 TanStack Query가 실제 요청 파라미터 객체를 query key로 관리하도록 했습니다. 아래는 `FrontEnd/src/entities/inventory/api/inventoryQueries.js`의 실제 query option입니다.
-
-```js
-export function inventoryListQueryOptions(params = {}) {
-  return queryOptions({
-    queryKey: inventoryKeys.list(params),
-    queryFn: ({ signal }) => getInventories(params, signal),
-    placeholderData: keepPreviousData,
-    retry: retryServerErrorOnly,
-  });
-}
-```
-
-목록 API가 실제로 보내는 파라미터도 `FrontEnd/src/entities/inventory/api/inventoryApi.js`에 고정되어 있습니다.
-
-```js
-if (filters.q) params.q = filters.q;
-if (filters.channelType?.length) params.channelType = filters.channelType;
-if (filters.salesPointCode?.length) params.salesPointCode = filters.salesPointCode;
-if (filters.warehouseCode?.length) params.warehouseCode = filters.warehouseCode;
-if (filters.regionCode?.length) params.regionCode = filters.regionCode;
-if (filters.categoryId) params.categoryId = filters.categoryId;
-if (filters.storageType?.length) params.storageType = filters.storageType;
-if (filters.riskGrade?.length) params.riskGrade = filters.riskGrade;
-if (filters.assessmentStatus?.length) params.assessmentStatus = filters.assessmentStatus;
-if (includePagination) {
-  if (filters.page) params.page = filters.page;
-  if (filters.size) params.size = filters.size;
-  if (filters.sort) params.sort = filters.sort;
-}
-```
-
-`staleTime`은 “이 데이터를 얼마 동안은 다시 최신인지 묻지 않을 것인가”입니다. 목록 query에는 전역 기본값을 사용하고, 필터 기준정보·상세·LOT·대시보드 snapshot처럼 성격이 다른 query에만 실제 코드의 `5 * 60 * 1000` 또는 `60 * 1000`을 별도로 둡니다.
-
-동기화 성공 후의 무효화도 generation을 가정한 의사코드가 아니라 현재 `FrontEnd/src/features/inventory-sync/ui/InventorySyncControl.jsx`에서 다음처럼 수행합니다.
-
-```js
-queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() });
-queryClient.invalidateQueries({ queryKey: inventoryKeys.summaries() });
-queryClient.invalidateQueries({ queryKey: inventoryKeys.details() });
-queryClient.invalidateQueries({ queryKey: inventoryKeys.lots() });
-queryClient.invalidateQueries({ queryKey: riskQueryKeys.all });
-queryClient.invalidateQueries({ queryKey: dashboardKeys.snapshot() });
-queryClient.invalidateQueries({ queryKey: statisticsKeys.all });
-```
-
-현재 API 응답에는 `generation`이나 `query.meta.generation`이 없습니다. 따라서 다음과 같은 generation 기반 predicate는 현재 코드 예시가 아니라, 서버가 세대 컬럼을 반환할 때 검토할 후속 설계입니다.
-
-```js
-queryClient.invalidateQueries({
-  queryKey: inventoryKeys.all,
-  predicate: (query) => query.meta?.generation !== latestGeneration,
-});
-```
-
-`staleTime: Infinity`는 “절대 새로 고치지 않음”이 아니라 “자동으로 낡았다고 판단하지 않음”에 가깝습니다. 따라서 authoritative generation이 바뀔 때 명시적으로 `invalidateQueries`해야 합니다. 반면 `gcTime: Infinity`까지 사용하면 여러 페이지·필터를 조회한 결과가 브라우저 메모리에 계속 남을 수 있습니다. 현재 범위에서는 캐시 수명을 유한하게 두고, 최종 generation 무효화로 필요한 데이터만 다시 가져오는 쪽이 안전합니다.
-
-### 페이지네이션은 데이터 양이 커질수록 중요합니다
-
-수만 건의 재고를 한 번에 내려주는 대신 서버가 `page`, `size`를 받아 필요한 범위만 조회하도록 했습니다. 목록 SQL도 `OFFSET`에만 의존하기보다 정렬 기준과 마지막 키를 이용하는 keyset 방식으로 확장할 수 있습니다.
-
-| 조회 방식 | 장점 | 한계 | 현재 판단 |
-| --- | --- | --- | --- |
-| 전체 조회 | 구현이 가장 쉽습니다. | 응답 크기와 메모리가 데이터 양에 비례합니다. | 선택하지 않았습니다. |
-| `OFFSET/LIMIT` | 페이지 번호 UI와 잘 맞습니다. | 뒤쪽 페이지일수록 앞의 행을 건너뛰는 비용이 커질 수 있습니다. | 현재 화면의 기본 방식입니다. |
-| keyset/cursor | 큰 데이터에서 다음 페이지 비용이 안정적입니다. | 임의의 페이지 번호 이동이 어렵고 정렬 키가 필요합니다. | 데이터가 커지면 목록 endpoint에 적용할 후보입니다. |
-
-### 고정 polling 대신 active-only adaptive polling을 사용합니다
-
-동기화가 실행 중일 때만 상태 API를 확인합니다. `QUEUED`는 3초, `RUNNING`은 10초 간격으로 조회하며, `SUCCEEDED`, `FAILED`, `SOURCE_CHANGED`, `LAUNCH_FAILED` 같은 terminal 상태에서는 polling을 멈춥니다. `INTERRUPTED`는 recovery 대상이므로 일반 active polling 대상과 구분합니다. 다음은 `FrontEnd/src/features/inventory-sync/model/inventorySyncQueries.js`의 실제 구현입니다.
-
-```js
-const POLL_INTERVAL_BY_STATUS_MS = {
-  QUEUED: 3000,
-  RUNNING: 10_000,
-};
-
-export function inventorySyncPollInterval(query) {
-  if (query?.state?.status === 'error') return false;
-  return POLLABLE_STATUSES.has(query?.state?.data?.status)
-    ? POLL_INTERVAL_BY_STATUS_MS[query.state.data.status]
-    : false;
-}
-
-export function inventorySyncLatestQueryOptions() {
-  return queryOptions({
-    queryKey: inventorySyncKeys.latest(),
-    queryFn: ({ signal }) => getInventorySyncLatest(signal),
-    staleTime: 10_000,
-    retry: false,
-    refetchOnWindowFocus: 'always',
-    refetchOnReconnect: 'always',
-    refetchInterval: inventorySyncPollInterval,
-    refetchIntervalInBackground: false,
-  });
-}
-```
-
-실제 파일에는 `POLLABLE_STATUSES = new Set(['QUEUED', 'RUNNING'])`도 함께 선언되어 있습니다. 즉 `error`, `INTERRUPTED`, terminal 상태에서는 `false`를 반환하고, 백그라운드 탭에서는 `refetchIntervalInBackground: false`로 반복 조회를 멈춥니다.
-
-여기서 중요한 것은 “polling이 동시성을 막는다”가 아니라는 점입니다. polling은 화면이 최신 상태를 다시 읽는 방법입니다. 동시 실행을 막는 일은 뒤에서 설명할 Oracle guard가 담당합니다. 창이 다시 활성화되거나 네트워크가 복구될 때 한 번 즉시 조회하는 것도 polling을 완전히 없애기 위한 것이 아니라, 연결이 끊겼던 동안의 상태를 보정하기 위한 동작입니다.
-
-## 2단계. 브라우저에서 시작 API를 호출합니다
-
-버튼을 누르면 브라우저는 `crypto.randomUUID()`로 이번 제출을 식별하는 `clientRequestId`를 생성합니다. 현재 시작 API의 body에는 scope나 trigger type을 따로 보내지 않습니다. 수동 요청은 Backend가 `trigger_type = 'MANUAL'`, `active_scope_key = 'INVENTORY_CANONICAL'`로 채웁니다.
-
-```json
-{
-  "clientRequestId": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-Backend의 실제 request DTO는 다음 한 필드만 받습니다(`BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/dto/InventorySyncStartRequest.java`).
-
-```java
-public record InventorySyncStartRequest(
-        @NotBlank @Size(min = 16, max = 80)
-        @Pattern(regexp = "[A-Za-z0-9_-]+")
-        String clientRequestId
-) { }
-```
-
-서버는 다음 결과를 구분해 응답합니다.
-
-| HTTP 응답 | 뜻 | 브라우저 동작 |
-| --- | --- | --- |
-| `202 Accepted` | 새 실행을 등록했고 백그라운드에서 처리할 예정입니다. | 반환된 `syncRunId`의 상태를 관찰합니다. |
-| `200 OK` | 같은 `clientRequestId`의 이전 요청을 재전송한 경우입니다. | 기존 실행을 새로 만들지 않고 기존 결과를 표시합니다. |
-| `409 Conflict` | 이미 같은 scope의 실행이 진행 중입니다. | “다른 동기화가 진행 중”이라고 보여줍니다. |
-| `429 Too Many Requests` | 짧은 시간에 너무 많이 요청했습니다. | 잠시 뒤 다시 시도하도록 안내합니다. |
-
-이 상태 코드는 문서에서 임의로 정한 값이 아닙니다. `BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/controller/InventorySyncRunController.java`가 service의 `SubmissionResult.httpStatus()`를 그대로 사용하고, 새 `202` 실행에만 `Location: /api/v1/inventory-sync-runs/{syncRunId}`를 붙입니다.
-
-```java
-var result = service.submit(request, principal == null ? null : principal.getUserId());
-if (result.httpStatus() == 429) {
-    return ResponseEntity.status(429)
-            .header("Retry-After", Long.toString(result.retryAfterSeconds()))
-            .body(ApiErrorResponse.of(ErrorCode.RATE_LIMITED, "동기화 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.", InventorySyncRoutes.RUNS));
-}
-ResponseEntity.BodyBuilder builder = ResponseEntity.status(result.httpStatus());
-if (result.response() != null && result.httpStatus() == 202) {
-    builder.location(URI.create(InventorySyncRoutes.RUNS + "/" + result.response().syncRunId()));
-}
-return builder.body(ApiResponse.of(result.response()));
-```
-
-네트워크가 끊겼을 때 사용자가 버튼을 다시 누르는 상황을 생각해 보겠습니다. 서버가 첫 요청을 받았지만 응답만 유실되었을 수 있습니다. 같은 `clientRequestId`로 재전송하면 서버는 새로운 작업을 또 만들지 않고 기존 요청을 찾아 응답합니다. 이것이 멱등성입니다. “같은 요청을 여러 번 보내도 결과가 한 번만 적용되는 성질”이라고 이해하면 됩니다.
-
-## 3단계. Backend의 짧은 제출 트랜잭션
-
-### 비관적 락이란 무엇인가
-
-비관적 락(pessimistic lock)은 충돌 가능성을 전제로 대상 행을 먼저 잠근 뒤 작업하는 방식입니다. 락을 획득하지 못한 요청은 대기하거나 충돌 응답을 받고, 락 보유 transaction이 끝난 뒤 다시 판단합니다.
-
-Oracle의 `SELECT ... FOR UPDATE`는 선택한 행을 잠그고 트랜잭션이 끝날 때까지 다른 변경을 기다리게 합니다. 이번 프로젝트에서는 재고 수만 건을 오랫동안 잠그는 것이 아니라, **동기화 제출 순서를 결정하는 아주 짧은 mutex 행**만 잠급니다.
-
-이 행 잠금은 제출 트랜잭션이 커밋되거나 롤백될 때 풀립니다. 따라서 core worker가 몇 분 동안 실행되는 동안 Oracle mutex를 계속 붙잡아 두는 설계가 아닙니다.
-
-`BackEnd/src/main/resources/mappers/inventorysync/InventorySyncRunMapper.xml`의 실제 제출 guard는 singleton 행 전체를 잠급니다. `mutex_id = 1` 조건을 SQL에 하드코딩하지 않는 대신, migration이 PK와 `CHECK (mutex_id = 1)`로 singleton 자체를 보장합니다.
-
-```sql
-SELECT 1 FROM inventory_sync_mutex
- FOR UPDATE;
-```
-
-그 singleton과 실행 row의 실제 DDL은 `BackEnd/src/main/resources/db/migration/V21__create_inventory_source_sync_schema.sql`에 있습니다.
-
-```sql
-CREATE TABLE inventory_sync_mutex (
-    mutex_id NUMBER(1) NOT NULL,
-    created_at TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-    CONSTRAINT pk_inventory_sync_mutex PRIMARY KEY (mutex_id),
-    CONSTRAINT ck_inventory_sync_mutex_singleton CHECK (mutex_id = 1)
-);
-INSERT INTO inventory_sync_mutex (mutex_id) VALUES (1);
-
-CREATE TABLE inventory_sync_run (
-    client_request_id VARCHAR2(80) NOT NULL,
-    active_scope_key VARCHAR2(50),
-    CONSTRAINT uq_isync_client_request UNIQUE (client_request_id),
-    CONSTRAINT uq_isync_active_scope UNIQUE (active_scope_key),
-    CONSTRAINT ck_isync_active_scope CHECK (
-        active_scope_key IS NULL OR active_scope_key = 'INVENTORY_CANONICAL'
-    )
-);
-```
-
-실제 V21은 위 제약을 `CREATE TABLE inventory_sync_run` 안에 선언합니다. `active_scope_key`는 terminal 전환 시 `NULL`로 지워지고, Oracle의 unique 제약은 여러 `NULL`을 허용하므로 `INVENTORY_CANONICAL`이라는 non-null active 값은 한 행만 가질 수 있습니다.
-
-이 트랜잭션 안에서 서버는 실제로 다음 순서로 검사합니다.
-
-1. 같은 `clientRequestId`가 이미 저장되었는지 확인합니다.
-2. `active_scope_key = 'INVENTORY_CANONICAL'`인 실행이 있는지 확인합니다.
-3. 진행 중이면 새 실행을 만들지 않고 `409`를 반환합니다.
-4. 없으면 `QUEUED`인 `inventory_sync_run`을 하나 삽입합니다.
-5. 트랜잭션이 커밋된 뒤에만 worker 실행을 시작합니다.
-
-코드의 핵심은 `BackEnd/src/main/java/com/stockit/backend/feature/inventorysync/service/InventorySyncSubmissionService.java`와 `InventorySyncRunMapper.xml`에 그대로 있습니다.
-
-```java
-if (runMapper.lockSubmissionGuard() != 1) {
-    throw new IllegalStateException("inventory source state is not initialized");
-}
-String hash = requestHash(request);
-InventorySyncRunVO existing = runMapper.selectByClientRequestId(request.clientRequestId());
-if (existing != null) {
-    if (!hash.equals(existing.getRequestHash())) {
-        return new SubmissionResult(409, InventorySyncRunResponse.from(existing));
-    }
-    return new SubmissionResult(200, InventorySyncRunResponse.from(existing));
-}
-InventorySyncRunVO active = runMapper.selectActiveRun();
-if (active != null) {
-    return new SubmissionResult(409, InventorySyncRunResponse.from(active));
-}
-run.setRunStatus("QUEUED");
-runMapper.insertRun(run);
-```
-
-실제 insert가 채우는 컬럼은 요청 body의 가상 scope 필드가 아니라 다음과 같습니다.
-
-```xml
-INSERT INTO inventory_sync_run (
-    client_request_id, request_hash, trigger_type, run_status, active_scope_key,
-    fencing_token, main_attempt_no, requested_by, requested_at,
-    created_at, updated_at
-) VALUES (
-    #{clientRequestId}, #{requestHash}, #{triggerType}, 'QUEUED', 'INVENTORY_CANONICAL',
-    1, 0, #{requestedBy}, SYSTIMESTAMP, SYSTIMESTAMP, SYSTIMESTAMP
-)
-```
-
-### 비관적 락만으로 충분하지 않은 이유
-
-비관적 락은 “지금 이 순간 제출하는 두 요청이 부딪히지 않게” 해줍니다. 하지만 실수로 active 실행 행을 두 개 만들거나, 다른 코드 경로가 락을 우회하면 중복 실행이 생길 수 있습니다. 그래서 `active_scope_key`에 unique 제약을 추가해 DB 자체가 같은 scope의 활성 행 두 개를 거부하도록 합니다.
-
-즉, `active_scope_key UNIQUE`는 행을 잠그는 비관적 락과 같은 개념이 아니라 “이 조건을 만족하는 행은 동시에 하나만 존재해야 한다”는 DB 무결성 규칙입니다. 두 장치를 함께 두었기 때문에 검사 순서와 최종 저장 결과를 각각 방어할 수 있습니다.
-
-| 보호 장치 | 막는 문제 |
-| --- | --- |
-| 비관적 락 | 동시에 들어온 제출 요청의 검사·삽입 순서가 뒤섞이는 문제 |
-| `active_scope_key UNIQUE` | 코드 경로가 달라도 활성 실행이 두 개 저장되는 문제 |
-| `clientRequestId UNIQUE` | 네트워크 재시도로 같은 요청이 중복 등록되는 문제 |
-| fencing token | 오래 멈췄던 worker가 늦게 돌아와 새 실행을 덮어쓰는 문제 |
-
-fencing token은 실행마다 붙는 세대 번호입니다. worker가 DB를 변경할 때 자신이 가진 token이 현재 실행의 token과 같은지 확인합니다. 오래된 worker가 다시 살아나도 token이 다르면 쓰기를 거부할 수 있습니다.
-
-### 다른 락 선택지와 비교했습니다
-
-| 선택지 | 잘 맞는 상황 | 장점 | 주의점 | 이번 프로젝트 판단 |
-| --- | --- | --- | --- | --- |
-| Oracle 비관적 락 + unique guard | 최종 데이터 권위가 Oracle에 있고 실행 빈도가 낮은 경우 | 데이터와 실행권을 한 권위에서 원자적으로 판단합니다. | 락을 오래 잡으면 대기와 교착이 생길 수 있습니다. | 제출 행만 짧게 잠그므로 선택했습니다. |
-| 낙관적 락 | 충돌이 드물고 대부분 동시에 수정하지 않는 경우 | 락 대기가 적고 처리량이 좋습니다. | 충돌 시 재시도·충돌 화면이 필요합니다. | 단일 active run 제출 보호만으로는 부족했습니다. |
-| Redis 분산락 | 여러 서비스가 Redis를 이미 공통 조정 계층으로 사용하는 경우 | 획득이 빠르고 여러 서버가 공유할 수 있습니다. | lease 만료와 네트워크 단절 때 DB와 락 권위가 갈라지는 split-brain 위험이 있습니다. | 최종 guard로는 선택하지 않았습니다. |
-| JVM 로컬 락 | WAS 한 대의 메모리 안에서만 동작하는 경우 | 코드가 간단합니다. | 서버가 두 대면 서로 모릅니다. | 운영 guard로 사용할 수 없습니다. |
-
-Redis가 쓸모없다는 뜻은 아닙니다. 캐시, rate limit, 실시간 fan-out에는 유용합니다. 다만 재고와 실행 상태의 최종 권위가 Oracle인 구조에서 Redis lease를 유일한 실행권으로 두면, lease가 만료된 뒤 새 worker와 이전 worker가 동시에 DB를 만지는 문제가 생길 수 있습니다. 그래서 이번 범위에서는 Oracle을 실행권의 기준으로 두고 Redis는 필수 구성에서 제외했습니다.
-
-## 4단계. 커밋 후 Spring Batch core worker가 실행됩니다
-
-제출 API가 트랜잭션을 열어둔 채 worker를 직접 호출하지 않습니다. 먼저 `QUEUED` 실행을 커밋하고, 커밋 후에 bounded launcher가 Spring Batch job을 시작합니다. 이렇게 해야 API 트랜잭션 롤백으로 실행이 사라졌는데 worker만 시작되는 상황을 피할 수 있습니다.
-
-실제 `InventorySyncSubmissionService`는 `TransactionSynchronizationManager`의 `afterCommit` callback에서 `launcher.launch(runId)`를 호출합니다. launcher의 큐는 `ThreadPoolExecutor(1, 1, new ArrayBlockingQueue<>(4), AbortPolicy)`로 제한되어 있고, 큐가 가득 차면 `LAUNCH_FAILED` control transaction으로 기록합니다.
-
-```java
-TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-    @Override
-    public void afterCommit() {
-        if (!launcher.launch(runId)) {
-            markLaunchFailed(runId, run.getMainAttemptNo(), run.getFencingToken(),
-                    "worker queue가 가득 차 실행을 등록하지 못했습니다.");
-        }
-    }
-});
-```
-
-### worker는 브라우저의 Web Worker가 아닙니다
-
-여기서 worker는 서버에서 백그라운드 작업을 처리하는 실행자입니다. 브라우저 화면의 JavaScript를 별도 스레드에서 실행하는 Web Worker와 다른 개념입니다.
-
-Spring Batch는 작업의 단계와 실행 메타데이터를 관리합니다. `JobRepository`에는 job execution과 step execution이 남기 때문에 서버가 중단되었을 때 “어디까지 실행했는가”를 추적하고 재시작할 기반이 됩니다. 단, Spring Batch만 있다고 모든 고아 실행이 자동으로 끝나는 것은 아닙니다. 현재 코드의 recovery service는 운영자가 stale run을 확인해 재시작하는 경로이고, 자동 recovery scanner는 아직 구현하지 않았습니다.
-
-### 원천 4종을 한 번에 메모리에 올리지 않습니다
-
-현재 worker는 원천 순서를 `OFFLINE → ECOMMERCE → GREETING → WAREHOUSE`로 정하고 한 페이지씩 읽습니다. `InventorySyncWorker.PAGE_SIZE`는 실제로 `500`이며, `source_record_key`와 `inventory_source_row_map`을 keyset 방식으로 조회합니다.
-
-```text
-OFFLINE → ECOMMERCE → GREETING → WAREHOUSE
-       각 원천을 source_record_key 기준으로 페이지 처리
-                              ↓
-        source projection + row map + 현재 version
-                              ↓
-                CanonicalInventoryRecord
-```
-
-원천 행은 다음 조건을 만족할 때 변경 후보가 됩니다.
-
-```sql
-WHERE m.source_type = #{sourceType}
-  AND m.mapping_status = 'MAPPED' AND m.is_deleted = 0
-  AND st.current_version = #{sourceVersion}
-  AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash)
-  <if test="lastSourceRecordKey != null">
-    AND m.source_record_key &gt; #{lastSourceRecordKey}
-  </if>
-ORDER BY m.source_record_key
-FETCH NEXT #{limit} ROWS ONLY
-```
-
-위 구간은 `BackEnd/src/main/resources/mappers/inventorysync/InventorySyncSourcePageMapper.xml`의 실제 filter입니다. `src`는 source type별 current 테이블에서 projection한 inline view이고, `m`은 `inventory_source_row_map`, `st`는 `inventory_source_state`입니다. 따라서 `record_hash`가 달라도 `mapping_status != 'MAPPED'`이면 page에 들어오지 않습니다.
-
-`record_hash`는 행의 현재 내용을 요약한 값이고, `synced_record_hash`는 마지막으로 canonical에 반영했을 때의 요약값입니다. 둘이 같으면 재처리 후보에서 제외할 수 있습니다. 다만 hash는 “변경 후보를 줄이는 기준”이지 최종 진실 그 자체는 아닙니다. publish 단계에서 target 값과 transaction을 다시 확인해야 합니다.
-
-worker가 실제로 page를 넘기는 코드는 다음과 같습니다.
-
-```java
-String lastSourceRecordKey = null;
-for (;;) {
-    List<CanonicalInventoryRecord> page = sourceMapper.selectCanonicalPage(
-            sourceType, sourceVersion, lastSourceRecordKey, PAGE_SIZE
-    );
-    if (page.isEmpty()) break;
-    page.forEach(record -> adapters.get(sourceType).accept(record, buffer));
-    lastSourceRecordKey = page.get(page.size() - 1).sourceRecordKey();
-    if (page.size() < PAGE_SIZE) break;
-}
-```
-
-원천 수량을 직접 `UPDATE`하는 데모를 만들 때도 수량만 바꾸면 안 됩니다. `row_version`, `record_hash`, `inventory_source_state.current_version`, `pending_record_count`가 함께 갱신되어야 다음 sync가 변경을 알아챌 수 있습니다. 그래서 프로젝트의 `INVENTORY_DEMO_ADJUSTMENT`는 시연용 수량 변경과 멱등성·감사 이력을 담당하지만, canonical 업무 데이터는 직접 수정하지 않습니다.
-
-### 버전이 실행 중 바뀌면 어떻게 하나
-
-worker가 원천의 시작 version을 읽은 뒤 처리 중에 version이 바뀌면, 한 실행 안에서 서로 다른 시점의 데이터를 섞을 수 있습니다. 이를 막기 위해 source version을 확인하고 바뀌었으면 해당 실행을 실패·재시도 대상으로 분류합니다. 이 방법은 “무조건 최신 한 행”보다 한 실행의 일관된 기준을 우선하는 선택입니다.
-
-## 5단계. canonical 재고와 위험등급을 publish합니다
-
-페이지 조회 SQL은 `mapping_status = 'MAPPED'`인 row map만 선택합니다. 그 결과를 typed `CanonicalInventoryRecord`로 변환하면서 필수 ID, 수량 범위, 원천 타입을 검증하고, 통과한 record만 `InventorySyncAttemptBuffer`에 담습니다.
-
-core publish 트랜잭션에서는 다음 결과를 함께 확정합니다.
-
-```text
-검증된 changed record
-       ↓
-canonical 상품·SKU·LOT·재고 target 비교
-       ↓
-재고 수량/가격/정책 반영
-       ↓
-위험등급 재산정 결과 반영
-       ↓
-동일 syncRunId lineage 기록
-       ↓
-트랜잭션 commit
-```
-
-재고만 반영되고 위험등급은 이전 실행을 가리키는 상황을 줄이기 위해, 현재 범위에서는 canonical publish와 위험등급 계산을 하나의 core 트랜잭션 경계에서 처리합니다. 그렇다고 대시보드·통계 스냅샷까지 이 트랜잭션에 억지로 넣지는 않습니다. 집계 결과는 별도의 읽기 모델에 저장할 수 있고, 계산 시간이 길어지면 core 작업을 불필요하게 붙잡기 때문입니다.
-
-실제 publish entry point는 `InventorySyncPublisher.publish`의 `@Transactional` 메서드입니다. `InventorySyncCanonicalBatchWriter`는 reference target을 먼저 쓰고, `inventory_balance`를 500건 단위로 나눈 뒤 source current의 `synced_record_hash`를 같은 transaction에서 갱신합니다.
-
-```java
-@Transactional
-public PublishResult publish(
-        InventorySyncAttemptBuffer buffer,
-        FencingGuard fencingGuard,
-        CanonicalBatchWriter writer,
-        CompletionWriter completion
-) {
-    fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
-    writer.beforeWrite(buffer.runId(), buffer.sourceVersions());
-    int changed = writer.writeReferenceTargets(buffer.runId(), buffer, buffer.requestedBy());
-    List<CanonicalInventoryRecord> batch = new java.util.ArrayList<>(BATCH_SIZE);
-    for (CanonicalInventoryRecord record : buffer.records()) {
-        batch.add(record);
-        if (batch.size() == BATCH_SIZE) {
-            changed += writer.writeBatch(buffer.runId(), List.copyOf(batch), buffer.requestedBy());
-            batch.clear();
-            fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
-        }
-    }
-    if (!batch.isEmpty()) {
-        changed += writer.writeBatch(buffer.runId(), List.copyOf(batch), buffer.requestedBy());
-    }
-    writer.finish(buffer.runId(), buffer.sourceVersions(), buffer.riskScopes(), buffer.requestedBy());
-    fencingGuard.assertWritable(buffer.runId(), buffer.attemptNo(), buffer.fencingToken());
-    PublishResult result = new PublishResult(buffer.size(), changed, buffer.riskScopes().size());
-    completion.complete(buffer, result);
-    return result;
-}
-```
-
-canonical target의 컬럼명은 `BackEnd/src/main/resources/mappers/inventorysync/InventorySyncCanonicalMapper.xml`에서 확인할 수 있습니다.
-
-```xml
-<update id="updateInventoryBalances">
-    MERGE INTO inventory_balance target
-    USING (
-        <foreach collection="records" item="record" separator=" UNION ALL ">
-            SELECT CAST(#{record.inventoryBalanceId} AS NUMBER) AS inventory_balance_id,
-                   CAST(#{record.onHandQty} AS NUMBER(15,3)) AS on_hand_qty,
-                   CAST(#{record.reservedQty} AS NUMBER(15,3)) AS reserved_qty
-              FROM dual
-        </foreach>
-    ) source
-       ON (target.inventory_balance_id = source.inventory_balance_id AND target.is_deleted = 0)
-    WHEN MATCHED THEN UPDATE SET
-         target.on_hand_qty = source.on_hand_qty,
-         target.reserved_qty = source.reserved_qty,
-         target.updated_at = SYSTIMESTAMP,
-         target.updated_by = #{actorId}
-     WHERE NVL(target.on_hand_qty, -1) != NVL(source.on_hand_qty, -1)
-        OR NVL(target.reserved_qty, -1) != NVL(source.reserved_qty, -1)
-</update>
-```
-
-위 `USING` 절은 `CanonicalInventoryRecord.inventoryBalanceId`, `onHandQty`, `reservedQty`를 각각 `inventory_balance_id`, `on_hand_qty`, `reserved_qty`로 바인딩합니다. 새 canonical row를 자동 삽입하는 `WHEN NOT MATCHED`는 runtime mapper에 없고, 앞 단계의 row map이 가리키는 기존 PK만 갱신합니다. 위험 평가는 `risk_assessment.inventory_sync_run_id`에 같은 `runId`를 기록합니다.
-
-## 6단계. 대시보드와 통계 스냅샷은 별도 작업입니다
-
-core publish가 성공했다고 화면용 대시보드와 통계가 이미 계산된 것은 아닙니다. 두 집계는 같은 동기화 결과를 읽지만 서로 다른 작업입니다. 현재 코드에는 `inventory_sync_task` 테이블이 없고, `InventorySyncSnapshotCoordinator`가 두 개의 bounded in-memory executor를 사용합니다.
-
-실제 구현은 `InventorySyncCanonicalBatchWriter.finish`에서 `scheduleAfterCommit`을 호출하고, coordinator가 DB commit 이후 두 작업을 각각 예약하는 방식입니다.
-
-```text
-canonical publish transaction commit
-        ↓ afterCommit
-dashboardExecutor → DashboardSnapshotService.createSnapshot(syncRunId, businessDate)
-statisticsExecutor → StatisticsSnapshotService.createInventorySnapshots(syncRunId, businessDate)
-```
-
-```java
-public void scheduleAfterCommit(Long syncRunId, LocalDate businessDate) {
-    if (TransactionSynchronizationManager.isSynchronizationActive()) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                schedule(syncRunId, businessDate);
-            }
-        });
-        return;
-    }
-    schedule(syncRunId, businessDate);
-}
-
-void schedule(Long syncRunId, LocalDate businessDate) {
-    submit(dashboardExecutor,
-            () -> dashboardSnapshotService.createSnapshot(syncRunId, businessDate),
-            "dashboard", syncRunId);
-    submit(statisticsExecutor,
-            () -> statisticsSnapshotService.createInventorySnapshots(syncRunId, businessDate),
-            "statistics", syncRunId);
-}
-```
-
-후속 구조에서 `inventory_sync_task`를 도입한다면 `(sync_run_id, task_type)` unique key와 `PENDING/RUNNING/RETRY_WAIT/SUCCEEDED/FAILED` 같은 상태를 저장할 수 있습니다. 하지만 이 테이블과 컬럼은 현재 migration에 없으므로, 현재 구현으로 소개하지 않고 다음 스키마 변경 후보로만 남깁니다.
-
-| 상황 | 바람직한 처리 |
-| --- | --- |
-| 대시보드 성공, 통계 실패 | 대시보드 결과는 유지하고 통계만 재시도합니다. |
-| 통계가 오래 걸림 | 마지막 성공 통계를 보여주고 “최신 동기화 반영 대기”를 표시합니다. |
-| worker 재시작 | DB에서 아직 완료되지 않은 task를 찾아 다시 claim합니다. |
-| 두 task 모두 완료 | snapshot-ready 상태를 만들고 sync run을 최종 완료로 전환합니다. |
-
-현재 코드의 스냅샷 coordinator는 두 개의 in-memory executor로 분리되어 있어 정상 실행 중에는 서로 영향을 덜 주지만, 프로세스가 죽으면 메모리 큐에 있던 작업이 사라질 수 있습니다. 따라서 다음 스키마 변경에서 `inventory_sync_task`를 도입하고, active scope 해제 시점을 두 snapshot의 terminal 상태 이후로 옮기는 것이 다음 단계입니다.
-
-### 왜 Kafka나 RabbitMQ를 바로 넣지 않았는가
-
-이번 동기화는 초당 수천 건의 이벤트를 계속 흘리는 스트림이 아니라 사용자가 누르거나 스케줄러가 시작하는 저빈도·고신뢰성 작업입니다. 현재는 Spring Batch와 Oracle JobRepository, in-memory snapshot executor를 사용합니다. durable task를 추가하면 작업 상태·재시작·재시도를 DB에 영속화할 수 있습니다.
-
-| 기술 | 강점 | 이번 범위에서의 비용 | 도입 판단 |
-| --- | --- | --- | --- |
-| Spring Batch + in-memory snapshot executor | 현재 코드 구조를 유지하면서 core 이후 집계를 분리합니다. | 프로세스 재시작 시 메모리 큐 작업을 잃을 수 있습니다. | 현재 적용입니다. |
-| DB durable task + Spring Batch | 상태와 업무 데이터가 같은 권위에 있고 재시작·재시도가 가능합니다. | task 스키마와 claim/recovery를 추가해야 합니다. | 다음 스키마 변경 후보입니다. |
-| RabbitMQ | work queue, ack, 재전달, consumer 확장이 쉽습니다. | broker, queue, DLQ, ack·중복 처리 운영이 추가됩니다. | 독립 worker가 늘거나 backlog를 분리할 때 검토합니다. |
-| Kafka | 이벤트 보존·재생·다수 consumer·높은 처리량에 강합니다. | topic/partition/key/consumer lag 운영이 필요합니다. | CDC나 다수 downstream이 필요할 때 검토합니다. |
-
-RabbitMQ의 ack는 “처리 결과가 반드시 한 번만 반영됐다”는 보장이 아닙니다. consumer가 ack 전에 죽으면 메시지가 다시 전달될 수 있으므로, DB 쪽 멱등성은 여전히 필요합니다. Kafka도 메시지를 저장하고 재생할 수 있지만, 이 프로젝트의 한 번의 sync workflow를 잠그는 역할까지 대신하지는 않습니다.
-
-## 7단계. 고아 실행과 락을 복구합니다
-
-서버가 OOM, 배포, 네트워크 장애로 죽으면 `RUNNING` 상태와 활성 scope가 DB에 남을 수 있습니다. 이를 고아 실행(orphan run)이라고 합니다. 만료 시간을 두지 않으면 아무도 실행하지 않는데 버튼이 계속 막히는 문제가 생깁니다.
-
-현재 worker는 heartbeat로 `lease_expires_at`을 갱신하고, `InventorySyncRecoveryService`가 운영자 요청으로 stale run을 확인합니다. 자동으로 오래된 run/task를 주기적으로 찾아 재시작하는 scanner는 후속 설계입니다.
-
-```text
-RUNNING + lease_expires_at < 현재 시각
-        ↓
-행을 다시 잠그고 fencing token 확인
-        ↓
-INTERRUPTED 또는 RETRY_WAIT로 전환
-        ↓
-재시도 횟수 안이면 새 worker가 claim
-        ↓
-한도 초과면 FAILED
-```
-
-lease는 “작업이 살아 있는지 판단하는 시간표”이지 Oracle row lock을 며칠 동안 유지하는 장기 락이 아닙니다. 후속 durable task를 도입할 때에는 같은 task를 두 worker에게 주지 않도록 claim update와 fencing token을 DB 조건에 포함해야 합니다.
-
-현재 run 복구는 `InventorySyncRunMapper.xml`의 실제 조건으로 이전 worker를 끊습니다. `advanceRecoveryAttempt`가 `main_attempt_no`와 `fencing_token`을 각각 1씩 올리기 때문에, 늦게 돌아온 worker가 이전 token으로 `heartbeat`, `updatePhase`, `complete`를 호출해도 `WHERE fencing_token = #{fencingToken}` 조건을 통과하지 못합니다.
-
-```xml
-<update id="advanceRecoveryAttempt">
-    UPDATE inventory_sync_run
-       SET run_status = 'QUEUED', current_phase = NULL,
-           main_attempt_no = main_attempt_no + 1,
-           fencing_token = fencing_token + 1,
-           main_batch_job_execution_id = NULL,
-           lease_owner_instance_id = NULL, lease_expires_at = NULL,
-           heartbeat_at = NULL, updated_at = SYSTIMESTAMP
-     WHERE inventory_sync_run_id = #{runId}
-       AND run_status IN ('INTERRUPTED', 'QUEUED')
-       AND (run_status = 'INTERRUPTED' OR requested_at <= #{now} - INTERVAL '5' MINUTE)
-       AND (lease_expires_at IS NULL OR lease_expires_at <= #{now})
-       AND (lease_owner_instance_id IS NULL OR heartbeat_at IS NULL OR heartbeat_at <= #{now} - INTERVAL '5' MINUTE)
-</update>
-```
-
-또한 실행 버튼의 active guard를 core publish 직후 풀어버리면, 첫 번째 sync의 snapshot이 끝나기 전에 두 번째 sync가 시작될 수 있습니다. 현재 구현은 core run의 lifecycle을 기준으로 active scope를 관리하며, 스냅샷 task까지 묶어 해제하는 전이는 아직 없습니다. 후속 durable task를 도입할 때 dashboard와 statistics task가 모두 terminal 상태가 된 뒤에만 `active_scope_key`를 비우는 방식을 검토합니다. 스냅샷이 수 분 이상 걸리는 운영 규모가 되면, 특정 `syncRunId`의 읽기 시점을 고정한 뒤 core active lock을 먼저 해제하는 snapshot isolation/read model 구조도 별도 검토해야 합니다.
-
-## 8단계. 브라우저는 완료 상태를 다시 확인합니다
-
-### 현재 transport: active-only adaptive polling
-
-현재 상태 조회는 작업이 활성일 때만 동작하는 adaptive polling입니다. `QUEUED`는 3초, `RUNNING`은 10초 간격으로 조회하고 terminal 상태에서는 polling을 멈춥니다. ETag와 `304 Not Modified`는 확인 요청은 남기면서 응답 본문을 줄이기 위한 후속 API 계약입니다.
-
-```text
-GET /api/v1/inventory-sync-runs/latest
-If-None-Match: "workflow-version-42"
-
-변경 없음 → 304 Not Modified
-변경 있음 → 200 + 새 상태 + ETag
-```
-
-ETag는 DB 락이 아닙니다. “이 응답이 어느 버전인지”를 비교하는 HTTP 캐시 검증자입니다. 따라서 ETag만으로 동시 실행을 막을 수 없고, 서버의 active guard와 함께 사용해야 합니다.
-
-### 선택적 notification transport: SSE
-
-SSE(Server-Sent Events)는 서버가 브라우저로 한 방향 알림을 계속 보내는 연결입니다. 예를 들어 `dashboard-snapshot-ready`, `statistics-snapshot-ready` 이벤트를 보낼 수 있습니다.
-
-```text
-브라우저 ── POST ──▶ API
-브라우저 ◀─ SSE ───  snapshot-ready 알림
-브라우저 ── GET ──▶ 실제 최신 데이터 재검증
-```
-
-SSE는 화면을 빠르게 반응시키는 알림 채널이지, 실행권·락·작업 내구성을 보장하는 저장소가 아닙니다. 연결이 끊긴 동안 이벤트를 놓칠 수 있으므로, 재연결 후 GET으로 상태를 보정하고 polling을 fallback으로 유지합니다. 여러 대의 WAS에서 SSE를 쓰려면 공통 fan-out 계층이나 각 노드의 연결 관리도 필요합니다.
-
-현재 구현에서 SSE를 실행권이나 상태 저장소로 사용하고 있지는 않습니다. 나중에 연결된 사용자에게 빠른 `snapshot-ready` 알림이 필요할 때 선택적으로 붙일 수 있지만, “SSE만 사용하고 polling은 완전히 없앤다”가 이번 프로젝트의 기본안은 아닙니다. active polling은 최종 상태를 다시 확인하는 안전망이고, SSE는 있으면 좋은 빠른 알림입니다.
-
-## 다른 선택지보다 이 조합을 선택한 이유
-
-기술을 많이 붙이는 것이 곧 실무적인 설계는 아닙니다. 이번 프로젝트는 Oracle이 이미 재고의 최종 권위이고, 동기화 요청 빈도가 높지 않으며, 장애 시나리오를 코드 경계로 설명할 수 있어야 한다는 조건을 기준으로 선택했습니다.
-
-| 해결하려는 문제 | 선택한 기술 | 선택하지 않은 대안 | 선택한 이유 |
-| --- | --- | --- | --- |
-| 동일 scope 중복 실행 | Oracle 비관적 락 + unique guard | Redis 분산락만 사용 | 최종 데이터와 실행권의 권위를 한 DB에서 판단합니다. |
-| 긴 동기화 처리 | `202 Accepted` + Spring Batch | 긴 HTTP 동기 요청 | 브라우저 연결과 작업 수명을 분리합니다. |
-| 재고 원천 변경 감지 | hash + row/source version | 매번 전체 재적재 | 같은 행의 불필요한 publish를 줄입니다. |
-| 대량 목록 조회 | server pagination + query cache | 모든 행을 한 번에 조회 | 응답과 브라우저 메모리를 제한합니다. |
-| 화면 상태 확인 | active-only adaptive polling | 3초 고정 polling | 현재는 활성 상태에서만 조회하고, ETag는 후속 개선으로 남겼습니다. |
-| 빠른 완료 알림 | 선택적 SSE | SSE만으로 상태 보장 | 알림 유실을 GET/polling으로 보정할 수 있습니다. |
-| 스냅샷 실패 격리 | 두 개의 in-memory executor | 하나의 거대한 트랜잭션 | 현재 core publish와 집계 실패를 분리합니다. DB task·독립 retry는 후속 설계입니다. |
-| 메시지 브로커 | 현재는 도입하지 않음 | Kafka/RabbitMQ | 현재 작업 빈도에 비해 운영 복잡도가 더 큽니다. |
-
-인덱스와 파티션도 같은 원칙으로 적용합니다. `source_record_key`, `(source_type, mapping_status)`, 실행 상태와 만료 시각 같은 실제 필터·정렬 조건에 인덱스를 두고, Oracle 실행 계획과 p95 지표로 확인한 뒤 추가합니다. 데이터가 충분히 크고 보관 기간·날짜 범위가 명확해졌을 때만 파티션을 검토합니다. “DB 성능을 위해 인덱스와 파티션을 모두 넣는다”는 식으로 먼저 결정하지 않습니다.
-
-## End-to-end 실행 시나리오
-
-아래 순서는 현재 구현과 후속 목표를 구분해 기록한 end-to-end 시나리오입니다.
-
-1. **Frontend**가 사용자의 클릭에 `clientRequestId`를 붙이고 버튼을 비활성화합니다.
-2. **Frontend**가 `POST /api/v1/inventory-sync-runs`를 호출합니다.
-3. **Backend**가 짧은 트랜잭션 안에서 `inventory_sync_mutex` 행을 비관적 락으로 잠급니다.
-4. **Oracle**이 동일 요청 여부와 `active_scope_key UNIQUE`를 검사합니다.
-5. 진행 중인 작업이 있으면 **Backend**는 `409`를 반환하고, 없으면 `QUEUED` run을 저장합니다.
-6. 커밋 후 **Spring Batch launcher**가 core job을 시작합니다.
-7. **Worker**가 원천 4종을 500행 단위로 읽고 projection·row map·hash·version을 확인합니다.
-8. **Worker**가 typed record를 검증하고 buffer에 담습니다.
-9. **Oracle transaction**이 canonical 재고와 위험등급을 같은 `syncRunId` 기준으로 publish합니다.
-10. 현재는 core commit 후 **Backend**가 두 개의 in-memory snapshot executor를 등록합니다. 후속 구조에서는 dashboard/statistics durable task를 각각 저장합니다.
-11. 현재 snapshot 작업은 best-effort로 실행·로그 기록되고, durable task 도입 뒤 heartbeat·retry·lease recovery를 영속화합니다.
-12. 현재 **Frontend**는 sync 성공 후 목록·요약·상세·LOT·risk query를 무효화하고 다시 조회합니다. snapshot-ready/generation/SSE는 후속 계약입니다.
-13. durable task를 도입한 뒤에는 두 task 상태를 기준으로 workflow 완료와 active scope 해제 시점을 결정합니다.
-
-이 순서에서 3~5번은 동시성, 6~9번은 core 데이터 정확성, 10~11번은 스냅샷 작업의 현재 한계와 후속 내구성 설계, 12~13번은 사용자 화면과 실행 lifecycle을 담당합니다.
-
-## SLO로 무엇을 측정할 것인가
-
-SLO(Service Level Objective)는 “서비스가 어느 정도 수준으로 동작해야 하는가”를 수치로 정한 목표입니다. 예를 들어 “목록 API p95가 500ms 이내”, “동기화 상태가 30초 안에 화면에 반영”, “완료된 core run의 99%가 task를 잃지 않음”처럼 측정 가능한 문장으로 씁니다. 단순히 “빠르게”라고 쓰면 개선 전후를 비교할 수 없습니다.
-
-이번 기능에서 먼저 기록할 지표는 다음과 같습니다.
-
-| 영역 | 지표 | 보는 이유 |
-| --- | --- | --- |
-| 조회 | 목록·요약 API p50/p95/p99, 오류율 | 페이지네이션·인덱스가 실제로 효과가 있는지 확인합니다. |
-| 동기화 | QUEUED 대기 시간, core 처리 시간, 변경 행 수 | 병목이 제출·원천 조회·publish 중 어디인지 구분합니다. |
-| 스냅샷 | task queue age, 실행 시간, retry 횟수, 실패율 | 대시보드·통계가 core보다 늦어지는 정도를 확인합니다. |
-| 복구 | lease 만료 후 재시작 시간, orphan run 수 | 서버 재시작 시 작업을 잃지 않는지 확인합니다. |
-| DB | lock 대기 시간, CPU, buffer/cache hit, 실행 계획 | 인덱스·파티션을 추측으로 추가하지 않게 합니다. |
-
-현재 프로젝트에는 이 지표를 모두 측정한 운영 결과가 없으므로 “몇 퍼센트 빨라졌다”고 단정하지 않습니다. 먼저 기준선을 기록한 뒤 데이터 양과 동시 사용자 수를 늘려 비교해야 합니다.
-
-## 현재 적용된 것과 다음 스키마 변경 뒤 남은 것
-
-### 지금 코드와 문서에서 이미 확인한 것
-
-- Frontend 통합재고 조회는 TanStack Query와 서버 페이지네이션을 사용합니다.
-- 조회 query에는 캐시가 있고, 실행 상태는 활성 상태에서만 adaptive polling하도록 정리했습니다.
-- `gcTime`은 무한으로 두지 않고 비활성 캐시를 정리할 수 있는 유한 시간으로 설정했습니다.
-- Backend 제출 경로에는 Oracle mutex `FOR UPDATE`, active run 확인, client request 중복 확인, `202/409/429` 응답이 있습니다.
-- Spring Batch core worker는 원천별 page 처리, source version 확인, hash 기반 변경 후보, canonical publish를 수행합니다.
-- V21~V24 버전 SQL에는 원천 current·row map·source state·run source·error·demo adjustment와 위험 평가 lineage가 있습니다.
-
-### 다음 스키마 변경 전에는 적용하지 않을 것
-
-아래 항목은 현재 설계의 최종 목표이지만, 스키마 변경 승인 없이는 반영하지 않습니다.
-
-- `inventory_sync_task` durable task 테이블과 task 상태·lease 컬럼
-- `canonicalReadGeneration`, `workflowVersion` 같은 세대 정보
-- snapshot 두 개가 끝난 뒤 active scope를 해제하는 terminal 상태 전이
-- lease 만료 run/task를 복구하는 scanner와 fencing update
-- generation을 기준으로 한 targeted cache invalidation
-
-즉, 이 글은 “지금 모두 구현되었다”는 보고서가 아니라, 현재 적용된 부분과 다음 스키마 변경 후 도달할 목표를 분리한 설계 기록입니다. 다음 버전 스키마를 임의로 만들거나 실행하지 않는 것도 중요한 운영 원칙입니다.
-
-## 운영 판단 Q&A
-
-### polling이 없으면 다른 사용자가 누르는 것을 막을 수 없나요?
-
-막을 수 있습니다. 다른 사용자의 요청은 서버가 Oracle guard와 active run 검사로 `409`를 반환합니다. 다만 다른 사용자의 화면 버튼까지 즉시 회색으로 보이게 하려면 SSE나 짧은 상태 조회가 필요합니다. 화면 잠금과 실제 실행권은 별개의 문제입니다.
-
-### 위험등급 재산정과 대시보드·통계 스냅샷은 동시에 끝나나요?
-
-위험등급 재산정은 core publish의 일관된 결과에 포함시키고, 대시보드·통계 스냅샷은 그 결과를 읽는 별도 비동기 작업으로 둡니다. 따라서 core가 끝났다고 두 snapshot도 끝난 것은 아닙니다. 현재는 snapshot executor의 best-effort 완료를 별도로 관찰하고, durable task를 도입한 뒤에는 두 task 상태를 확인해 workflow 완료를 판단하는 방식을 검토합니다.
-
-### 비관적 락과 낙관적 락은 무엇이 다른가요?
-
-비관적 락은 “충돌할 것”이라고 보고 먼저 잠급니다. 낙관적 락은 일단 처리한 뒤 version이 그대로인지 확인하고, 누군가 먼저 바꿨으면 충돌로 판단해 재시도합니다. 충돌이 드물고 대기 시간이 민감하면 낙관적 락이 유리할 수 있지만, 이번 제출 API는 같은 scope의 실행을 애초에 하나만 만들면 되므로 짧은 비관적 락이 설명하기 쉽고 적합했습니다.
-
-### SSE가 있으면 상태 저장 테이블이 필요 없나요?
-
-필요합니다. SSE는 연결된 브라우저에 알림을 전달할 뿐이고, 연결이 끊긴 동안의 이벤트를 영구 보관하지 않습니다. 후속 durable task를 도입한다면 최종 상태와 재시작 기준은 Oracle task/run에 저장하고, SSE는 알림·재검증을 빠르게 하는 보조 채널로 사용합니다.
-
-### `staleTime`과 `gcTime`을 둘 다 무한으로 두면 가장 빠르지 않나요?
-
-대부분의 화면에서 그렇지 않습니다. `staleTime`을 길게 두려면 generation 변경 시 명시적으로 캐시를 무효화해야 하고, `gcTime`까지 무한이면 사용하지 않는 페이지 캐시가 메모리에 남습니다. 현재는 stale 판정과 메모리 회수를 분리하고, 최종 generation 기반 무효화를 추가하는 방향입니다.
-
-## 마무리
-
-이번 설계에서 선택한 기술의 핵심은 “유명한 기술을 모두 추가하는 것”이 아닙니다.
-
-- **Frontend**는 TanStack Query, 서버 페이지네이션, bounded cache, active-only adaptive polling으로 불필요한 조회를 줄입니다.
-- **Backend**는 `202 Accepted`, idempotency key, Spring Batch, 독립 task 실행으로 요청 수명과 작업 수명을 분리합니다.
-- **Oracle**은 비관적 락과 unique guard로 실제 실행권의 최종 권위를 가집니다.
-- **Worker**는 원천별 projection, hash·version, page 처리, fencing으로 대량 데이터와 오래된 실행을 통제합니다.
-- **Snapshot**은 현재 두 개의 in-memory executor로 분리되어 한쪽 실패가 core publish를 롤백하지 않게 합니다. durable task와 재시도는 후속 설계입니다.
-- **SSE**는 있으면 빠른 알림을 제공하지만, polling·GET 재검증을 대신하는 락이나 저장소로 사용하지 않습니다.
-- **Kafka와 RabbitMQ**는 현재 저빈도 workflow에 필수로 넣지 않고, 독립적인 소비자·backlog·이벤트 재생 요구가 생길 때 도입합니다.
-
-결국 사용자가 보는 것은 하나의 버튼이지만, 현재 서버가 보장하는 범위는 `한 번만 실행`, `변경된 데이터만 반영`, `publish transaction의 일관성`입니다. snapshot의 durable 복구와 결과 세대 추적은 후속 설계 범위로 남겼습니다. Frontend·Backend·DB·Batch의 책임을 분리했기 때문에 확장 시 변경 지점을 구분할 수 있습니다.
+그럴 수 있다. 성공은 정식 재고와 위험 판정의 확정을 뜻한다. 대시보드와 통계 스냅샷은 그 뒤 독립적으로 만들어지므로 짧은 지연이 생길 수 있다.
 
 ## 이어서 읽기
 
-- [원천 4종을 하나의 통합재고로 연결하기: 공통 메모리 형식과 검증 매핑 설계](/blog/integrated-inventory-source-normalization)
-- [Stocks FrontEnd 저장소](https://github.com/kosa11-final-project/FrontEnd)
-- [Stocks BackEnd 저장소](https://github.com/kosa11-final-project/BackEnd)
+- [서로 다른 원천을 하나의 통합재고로 바꾸는 방법](/blog/integrated-inventory-source-normalization)
+- [Frontend 저장소](https://github.com/ysknkd/stock-management-front)
+- [Backend 저장소](https://github.com/ysknkd/stock-management-back)
 
 ## 참고 자료
 
-- [Oracle Database 21c `SELECT ... FOR UPDATE`](https://docs.oracle.com/en/database/oracle/oracle-database/21/lnpls/database-pl-sql-language-reference.pdf?source=%3Aow%3Ams%3Apt%3A%3A)
-- [Spring Batch: Configuring a `JobRepository`](https://docs.spring.io/spring-batch/reference/job/configuring-repository.html)
-- [Spring Batch: Advanced metadata and recovering jobs](https://docs.spring.io/spring-batch/reference/job/advanced-meta-data.html)
-- [TanStack Query: Important Defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)
-- [TanStack Query: Polling with `refetchInterval`](https://tanstack.com/query/latest/docs/framework/react/guides/polling)
-- [MDN: HTTP conditional requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Conditional_requests)
-- [MDN: `If-None-Match`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match)
-- [MDN: Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
-- [RabbitMQ: Work queues](https://www.rabbitmq.com/tutorials/tutorial-two-javascript)
-- [RabbitMQ: Reliability guide](https://www.rabbitmq.com/docs/reliability)
-- [Apache Kafka: Introduction](https://kafka.apache.org/documentation/)
+- [Oracle Database: SELECT와 행 잠금](https://docs.oracle.com/en/database/oracle/oracle-database/21/sqlrf/SELECT.html)
+- [Spring Batch: 실행 메타데이터 저장소](https://docs.spring.io/spring-batch/reference/job/configuring-repository.html)
+- [Spring Batch: 작업 중단과 복구를 위한 메타데이터](https://docs.spring.io/spring-batch/reference/job/advanced-meta-data.html)
+- [MDN: HTTP 202 Accepted](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/202)
+- [TanStack Query: 기본 캐시 동작](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)
