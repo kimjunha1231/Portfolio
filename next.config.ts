@@ -30,6 +30,11 @@ const nextConfig: NextConfig = {
         destination: "/projects/jobsecretary",
         permanent: true,
       },
+      {
+        source: "/blog/integrated-inventory-implementation-worklog",
+        destination: "/blog/integrated-inventory-source-normalization",
+        permanent: true,
+      },
     ];
   },
   async headers() {
