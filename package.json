@@ -5,13 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-   "start": "next start",
+    "start": "next start",
    "lint": "eslint",
    "verify:site-contract": "node scripts/verify-site-contract.mjs",
+   "verify:agent-readiness": "node scripts/verify-agent-readiness.mjs",
    "verify:seo": "node scripts/verify-seo.mjs",
-   "seo:push": "node scripts/push-seo.mjs",
-   "postbuild": "node scripts/verify-seo.mjs && node scripts/push-seo.mjs"
- },
+    "seo:push": "node scripts/push-seo.mjs",
+    "postbuild": "node scripts/verify-seo.mjs && node scripts/push-seo.mjs"
+  },
   "dependencies": {
     "clsx": "^2.1.1",
     "framer-motion": "^12.42.2",

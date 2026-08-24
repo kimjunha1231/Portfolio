@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import MotionProvider from "@/components/providers/MotionProvider";
 import Preloader from "@/components/home/Preloader";
 import Hero from "@/components/home/Hero";
@@ -12,8 +13,10 @@ import {
   LINKEDIN_URL,
   PERSON_JOB_TITLE,
   PERSON_NAME,
+  SITE_BRAND,
   SITE_DESCRIPTION,
   SITE_URL,
+  TECHNICAL_TOPICS,
 } from "@/lib/site";
 
 export default function Home() {
@@ -30,12 +33,15 @@ export default function Home() {
           description: SITE_DESCRIPTION,
           inLanguage: "ko-KR",
           isPartOf: { "@id": `${SITE_URL.toString()}#website` },
-          mainEntity: { "@id": `${SITE_URL.toString()}#person` },
-          about: {
+          mainEntity: {
+            "@id": `${SITE_URL.toString()}#person`,
             "@type": "Person",
             name: PERSON_NAME,
+            alternateName: [SITE_BRAND, "Kim Junha"],
             jobTitle: PERSON_JOB_TITLE,
             url: SITE_URL.toString(),
+            sameAs: [GITHUB_URL, LINKEDIN_URL],
+            knowsAbout: TECHNICAL_TOPICS,
           },
         }}
       />
@@ -46,6 +52,73 @@ export default function Home() {
       <main className="flex-1 w-full flex flex-col relative z-10">
         {/* 히어로 영역 (좌측 텍스트 + 우측 3D 타이포 포스터) */}
         <Hero />
+
+        {/* 자바스크립트가 없어도 읽히는 서버 렌더링 요약 */}
+        <section
+          aria-labelledby="profile-summary-heading"
+          className="border-y border-card-border/60 bg-foreground/[0.02] px-6 py-16 md:px-12 lg:px-24"
+        >
+          <div className="mx-auto grid w-full max-w-7xl gap-10 lg:grid-cols-12 lg:gap-16">
+            <div className="lg:col-span-5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-foreground/50">
+                {SITE_BRAND} / Profile
+              </span>
+              <h2
+                id="profile-summary-heading"
+                className="mt-3 text-3xl font-light leading-tight tracking-tight md:text-5xl"
+              >
+                문제를 정의하고
+                <span className="block text-accent-blue">더 나은 흐름을 만듭니다.</span>
+              </h2>
+            </div>
+
+            <div className="space-y-6 text-sm leading-relaxed text-foreground/75 lg:col-span-7">
+              <p>
+                {PERSON_NAME}은(는) 프론트엔드 경험을 중심으로 제품의 문제를 발견하고,
+                필요한 기술을 선택해 끝까지 연결하는 풀스택 개발자입니다. React와
+                Next.js 기반 웹 서비스, Flutter 애플리케이션, Spring Boot와 Redis를
+                활용한 백엔드 기능을 다루며, 사용자 경험과 유지보수 가능한 구조를 함께
+                설계합니다.
+              </p>
+              <p>
+                이 포트폴리오에서는 실제 프로젝트의 문제 정의, 담당 역할, 기술적 선택,
+                성능 개선 과정과 결과를 공개된 사실에 근거해 확인할 수 있습니다. 사람은
+                프로젝트와 기술 블로그를 둘러보고, 에이전트는 짧은 인덱스와 원문 Markdown을
+                먼저 읽으면 필요한 근거만 빠르게 찾을 수 있습니다.
+              </p>
+
+              <div className="grid gap-6 border-t border-card-border/60 pt-6 sm:grid-cols-2">
+                <div>
+                  <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent-blue">
+                    전문 분야
+                  </h3>
+                  <p className="mt-2">
+                    HTML, CSS, TypeScript, React, Next.js, Flutter, Spring Boot,
+                    Redis, 웹 애니메이션, 성능 최적화와 아키텍처
+                  </p>
+                </div>
+                <div>
+                  <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent-blue">
+                    다음 탐색
+                  </h3>
+                  <p className="mt-2">
+                    <Link className="underline decoration-accent-blue/40 underline-offset-4 hover:text-accent-blue" href="/projects">
+                      프로젝트 사례
+                    </Link>
+                    {" · "}
+                    <Link className="underline decoration-accent-blue/40 underline-offset-4 hover:text-accent-blue" href="/blog">
+                      기술 블로그
+                    </Link>
+                    {" · "}
+                    <Link className="underline decoration-accent-blue/40 underline-offset-4 hover:text-accent-blue" href="/llms.txt">
+                      에이전트 인덱스
+                    </Link>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* 이력서 카드 스태킹 영역 (메인 이력서 본체) */}
         <InteractiveResume />

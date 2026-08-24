@@ -37,6 +37,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
         SITE_LAST_MODIFIED,
       ),
     },
+    ...["about", "contact", "privacy", "developers"].map((path) => ({
+      url: new URL(`/${path}`, SITE_URL).toString(),
+      lastModified: SITE_LAST_MODIFIED,
+    })),
     ...projects.map((project) => ({
       url: new URL(`/projects/${project.slug}`, SITE_URL).toString(),
       lastModified:

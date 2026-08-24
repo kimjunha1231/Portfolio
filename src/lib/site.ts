@@ -10,10 +10,11 @@ function getSafeSiteUrl(): URL {
 
 export const SITE_URL = getSafeSiteUrl();
 
-export const SITE_NAME = "김준하 | 프론트엔드 중심 풀스택 개발자";
-export const SITE_TITLE = "프론트엔드 중심 풀스택 개발자 김준하입니다.";
+export const SITE_BRAND = "Junha.dev";
+export const SITE_NAME = `${SITE_BRAND} | 김준하 포트폴리오`;
+export const SITE_TITLE = `${SITE_BRAND} — 프론트엔드 중심 풀스택 개발자 김준하입니다.`;
 export const SITE_DESCRIPTION =
-  "성능 최적화, 인터랙션, 확장 가능한 아키텍처를 고민하는 김준하의 포트폴리오와 기술 블로그입니다.";
+  "Junha.dev는 성능 최적화, 인터랙션, 확장 가능한 아키텍처를 고민하는 김준하의 포트폴리오와 기술 블로그입니다.";
 export const SITE_LAST_MODIFIED = "2026-08-24";
 export const PERSON_NAME = "김준하";
 export const PERSON_ALTERNATE_NAME = "Kim Junha";
