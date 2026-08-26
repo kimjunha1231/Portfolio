@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const agentDiscoveryLinkHeader = [
   '</llms.txt>; rel="describedby"; type="text/plain"',
   '</skill.md>; rel="service-desc"; type="text/markdown"',
+  '</agent-instructions.md>; rel="help"; type="text/markdown"',
+  '</developers>; rel="service-doc"; type="text/html"',
+  '</openapi.json>; rel="describedby"; type="application/vnd.oai.openapi+json"',
+  '</.well-known/mcp>; rel="service"; type="application/json"',
   '</.well-known/agent-skills/index.json>; rel="alternate"; type="application/json"',
 ].join(", ");
 
@@ -60,6 +64,30 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/videos/:slug",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/developers",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/about",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/contact",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/privacy",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/openapi.json",
+        headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
+      },
+      {
+        source: "/.well-known/mcp",
         headers: [{ key: "Link", value: agentDiscoveryLinkHeader }],
       },
     ];

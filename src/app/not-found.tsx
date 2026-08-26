@@ -36,6 +36,27 @@ export default function NotFound() {
             프로젝트 보기
           </Link>
         </div>
+
+        <section
+          aria-labelledby="not-found-next-heading"
+          className="mt-10 rounded-2xl border border-card-border/70 bg-foreground/[0.03] p-5 text-left"
+        >
+          <h2 id="not-found-next-heading" className="text-xs font-mono uppercase tracking-[0.18em] text-foreground/60">
+            다음 위치
+          </h2>
+          <ul className="mt-3 grid gap-2 text-xs leading-relaxed text-foreground/70 sm:grid-cols-2">
+            <li><Link className="underline underline-offset-4 hover:text-accent-blue" href="/sitemap.xml">사이트맵</Link>에서 모든 공개 URL을 확인하세요.</li>
+            <li><Link className="underline underline-offset-4 hover:text-accent-blue" href="/llms.txt">llms.txt</Link>에서 에이전트용 요약을 확인하세요.</li>
+            <li><Link className="underline underline-offset-4 hover:text-accent-blue" href="/developers">개발자 리소스</Link>에서 OpenAPI와 MCP를 확인하세요.</li>
+            <li><Link className="underline underline-offset-4 hover:text-accent-blue" href="/about">소개</Link>에서 사이트 운영자 정보를 확인하세요.</li>
+          </ul>
+          <pre className="mt-4 whitespace-pre-wrap border-t border-card-border/60 pt-4 font-mono text-[10px] leading-relaxed text-foreground/45">
+{`# 404 Not Found
+- [Sitemap](/sitemap.xml)
+- [Agent index](/llms.txt)
+- [Developer resources](/developers)`}
+          </pre>
+        </section>
       </div>
     </main>
   );

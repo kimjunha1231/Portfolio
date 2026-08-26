@@ -8,7 +8,7 @@ export async function GET(_: Request, { params }: RawBlogRouteProps) {
   const { slug } = await params;
   const post = getPostBySlug("blog", slug);
 
-  if (!post) {
+  if (!post || !post.published) {
     return new Response("Not found", { status: 404 });
   }
 

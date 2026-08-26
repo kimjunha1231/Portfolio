@@ -11,6 +11,30 @@ function getMarkdownPath(pathname: string) {
   return detailMatch ? `/${detailMatch[1]}/${detailMatch[2]}/raw` : null;
 }
 
+function isKnownPagePath(pathname: string) {
+  return [
+    "/",
+    "/projects",
+    "/blog",
+    "/videos",
+    "/about",
+    "/contact",
+    "/privacy",
+    "/developers",
+    "/.well-known/mcp",
+  ].includes(pathname) || /^\/(projects|blog|videos)\/[^/]+(?:\/raw)?$/.test(pathname);
+}
+
+const markdownNotFound = `# 404 Not Found
+
+The requested path does not exist on Junha.dev.
+
+- [Sitemap](/sitemap.xml)
+- [Agent index](/llms.txt)
+- [Developer resources](/developers)
+- [Home](/)
+`;
+
 export function proxy(request: NextRequest) {
   const acceptsMarkdown = request.headers
     .get("accept")
@@ -22,9 +46,21 @@ export function proxy(request: NextRequest) {
     return NextResponse.rewrite(new URL(markdownPath, request.url));
   }
 
+  if (!isKnownPagePath(request.nextUrl.pathname)) {
+    return new Response(markdownNotFound, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Cache-Control": "public, max-age=60, s-maxage=60",
+        "X-Robots-Tag": "noindex, follow",
+        "x-markdown-tokens": String(Math.max(1, Math.ceil(markdownNotFound.length / 4))),
+      },
+    });
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/projects", "/projects/:slug", "/blog", "/blog/:slug"],
+  matcher: ["/((?!_next/static|_next/image|api|.*\\.[^/]+$).*)"],
 };

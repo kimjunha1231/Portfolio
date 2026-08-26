@@ -8,7 +8,7 @@ export async function GET(_: Request, { params }: RawProjectRouteProps) {
   const { slug } = await params;
   const project = getPostBySlug("projects", slug);
 
-  if (!project) {
+  if (!project || !project.published) {
     return new Response("Not found", { status: 404 });
   }
 
