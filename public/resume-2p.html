@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>김준하 | 신입 개발자 이력서</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    :root { --blue:#2e6ff2; --ink:#121314; --muted:#626262; --line:#d9dbe0; --surface:#f3f5fa; --page:#fafbfd; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#e9edf4; color:var(--ink); font-family:"Noto Sans KR","Apple SD Gothic Neo",sans-serif; line-height:1.5; }
+    .page { width:210mm; min-height:297mm; margin:18px auto; padding:15mm 18mm 17mm; background:var(--page); position:relative; page-break-after:always; }
+    .page:last-child { page-break-after:auto; }
+    .page::after { content:""; position:absolute; left:18mm; right:18mm; bottom:13mm; border-bottom:1.4px solid var(--blue); }
+    .page-number { position:absolute; right:18mm; bottom:7mm; color:var(--muted); font-size:9px; }
+    .header { background:var(--surface); border:1.4px solid var(--blue); border-radius:10px 10px 0 0; padding:7mm 8mm 3mm; }
+    .header-grid { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:start; }
+    h1 { margin:0; color:var(--blue); font-size:30px; line-height:1.1; }
+    .role { margin-top:3px; color:var(--muted); font-size:13px; font-weight:600; }
+    .intro { margin:15px 0 5px; font-size:12px; font-weight:600; }
+    .education { color:var(--muted); font-size:10px; }
+    .contact { display:grid; grid-template-columns:1.2fr .8fr 1fr; gap:10px; padding:3mm 8mm 4mm; background:var(--surface); border:1.4px solid var(--blue); border-top:0; font-size:10px; color:var(--muted); }
+    .card { margin-top:4mm; padding:5mm 8mm; background:#fff; border:1px solid var(--line); border-radius:10px; }
+    h2 { margin:0 0 4mm; color:var(--blue); font-size:16px; }
+    .rows { display:grid; gap:0; }
+    .row { display:grid; grid-template-columns:35mm 1fr; gap:8mm; padding:2mm 0; border-bottom:1px solid var(--line); font-size:11px; }
+    .row:last-child { border-bottom:0; }
+    .label { color:var(--blue); font-weight:700; }
+    .muted { color:var(--muted); }
+    .awards .row { grid-template-columns:24mm 1.1fr .9fr; }
+    .project { margin-top:3mm; padding:4mm 7mm; background:#fff; border:1px solid var(--line); border-radius:10px; }
+    .project h3 { margin:0; color:var(--blue); font-size:15px; line-height:1.35; }
+    .meta { margin-top:1px; color:var(--muted); font-size:10px; }
+    ul { margin:2mm 0 0; padding-left:17px; font-size:11px; }
+    li { margin:1.3mm 0; }
+    .other { margin-top:4mm; color:var(--muted); font-size:10px; }
+    @media print { body { background:#fff; } .page { margin:0; } }
+    @media (max-width: 800px) { .page { width:100%; min-height:auto; margin:0; padding:24px 18px 50px; } .contact { grid-template-columns:1fr; } .header-grid { grid-template-columns:1fr; } .row, .awards .row { grid-template-columns:1fr; gap:2px; } .page::after, .page-number { display:none; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div class="header-grid"><div><h1>김준하</h1><div class="role">프론트엔드 중심 풀스택 개발자</div></div></div>
+      <p class="intro">복잡한 사용자 흐름을 작은 상태와 명확한 컴포넌트로 나누고, 측정 가능한 성능 개선으로 제품을 안정화합니다.</p>
+      <div class="education">숭실대학교 컴퓨터학부 · 2026년 8월 졸업예정 · 학점 3.72 / 4.5</div>
+    </header>
+    <div class="contact"><span>GitHub&nbsp; github.com/kimjunha1231</span><span>010-9383-9023</span><span>rlawnsgk0610@gmail.com</span></div>
+
+    <section class="card"><h2>기술 스택</h2><div class="rows">
+      <div class="row"><strong class="label">Frontend</strong><span>TypeScript, React, Next.js, Flutter, Dart</span></div>
+      <div class="row"><strong class="label">State / Data</strong><span>TanStack Query, Zustand, Riverpod, React Hook Form, Zod</span></div>
+      <div class="row"><strong class="label">Backend / Delivery</strong><span>Next.js API Routes, Spring Boot, MyBatis, Oracle, Redis, Firebase, Supabase, Vercel</span></div>
+      <div class="row"><strong class="label">자격증</strong><span>정보처리기사 · MOS Excel Expert 2016</span></div>
+    </div></section>
+
+    <section class="card"><h2>핵심 역량</h2><div class="rows">
+      <div class="row"><strong class="label">성능</strong><span>JobSecretary 칸반 드래그 최적화: 전체 커밋 271회 → 98회, 비활성 컴포넌트 렌더링 268회 → 0회</span></div>
+      <div class="row"><strong class="label">상태 경계</strong><span>Dearfam에서 서버 상태와 클라이언트 상태를 분리하고, MSW로 성공·실패·빈 상태를 독립 검증</span></div>
+      <div class="row"><strong class="label">통신 설계</strong><span>TITO에서 초기 조회는 REST API, 실시간 채팅·투표는 WebSocket으로 분리</span></div>
+      <div class="row"><strong class="label">품질</strong><span>Lighthouse 접근성 80점대 → 95점대, Jest·Playwright·Sentry로 테스트와 모니터링 구성</span></div>
+    </div></section>
+
+    <section class="card"><h2>활동</h2><div class="rows">
+      <div class="row"><span class="muted">2024.11 ~ 2025.09</span><span>Dearfam 프론트엔드 리드 · Pre-스타트업 선정 및 창업 사무실 입주</span></div>
+      <div class="row"><span class="muted">2024.09 ~ 2025.09</span><span>Google Developer Groups on Campus · 숭실대학교</span></div>
+      <div class="row"><span class="muted">2023.09 ~ 2025.03</span><span>숭실대학교 학생복지위원회 · 학생복지위원장</span></div>
+      <div class="row"><span class="muted">2024.01</span><span>미래와 소프트웨어와 함께하는 꿈찾기 캠프 · 프로그래밍 STAFF</span></div>
+    </div></section>
+
+    <section class="card awards"><h2>수상</h2><div class="rows">
+      <div class="row"><strong class="label">2024.12</strong><span>2024 클라우드 아이디어 공모전</span><span>대상 · 부산시장상</span></div>
+      <div class="row"><strong class="label">2024.12</strong><span>2024 한이음 ICT멘토링 공모전</span><span>은상 · 정보통신기획평가원장상</span></div>
+      <div class="row"><strong class="label">2025.10</strong><span>제15회 숭실캡스톤디자인 경진대회</span><span>장려상</span></div>
+      <div class="row"><strong class="label">2025.11</strong><span>2025 한이음 드림업 공모전</span><span>장려상 · 한국정보산업연합회장상</span></div>
+      <div class="row"><strong class="label">2024.11</strong><span>숭실 발명아이디어 경진대회</span><span>최우수상 · 숭실대학교 총장상</span></div>
+    </div></section>
+    <span class="page-number">김준하 · 1</span>
+  </main>
+
+  <main class="page">
+    <h2>프로젝트</h2>
+    <article class="project"><h3>JobSecretary · AI 취업 준비 관리 서비스</h3><div class="meta">2025.11 ~ 2025.12 · 개인 프로젝트 · 기획/설계/개발/테스트/배포 100%</div><ul>
+      <li>Next.js, TypeScript, Supabase, Gemini API, Vercel로 채용 공고·지원 현황·자기소개서·면접 준비를 하나의 흐름으로 연결했습니다.</li>
+      <li>dnd-kit의 드래그 상태와 카드 콘텐츠를 분리하고 React.memo를 적용해 전체 커밋 271회 → 98회, 비활성 렌더링 268회 → 0회를 달성했습니다.</li>
+      <li>React Hook Form·Zod·TanStack Query·Zustand와 Jest·Playwright·Sentry를 조합해 입력 안정성과 회귀 검증 환경을 구성했습니다. Lighthouse 접근성은 80점대에서 95점대로 향상했습니다.</li>
+    </ul></article>
+    <article class="project"><h3>Dearfam · AI 가족 추억 콘텐츠 서비스</h3><div class="meta">2024.11 ~ 2025.09 · 프론트엔드 리드 · 기여도 80%</div><ul>
+      <li>Flutter·Firebase MVP를 React·TypeScript 웹 서비스로 전환하고 Zustand·TanStack Query로 클라이언트/서버 상태를 분리했습니다.</li>
+      <li>MSW로 가족·게시글·댓글·인증 API를 모킹해 백엔드와 병렬 개발했으며, mutation 실패 시 캐시 롤백을 포함한 낙관적 업데이트를 구현했습니다.</li>
+      <li>2024 클라우드 아이디어 공모전 대상(부산시장상), Pre-스타트업 선정 및 숭실캡스톤디자인 장려상으로 이어진 팀 프로젝트입니다.</li>
+    </ul></article>
+    <article class="project"><h3>TITO · LLM 기반 실시간 토론 보조 서비스</h3><div class="meta">2024.03 ~ 2024.12 · 프론트엔드 리드 · 기여도 80%</div><ul>
+      <li>Flutter·Dart·Riverpod·Dio·Retrofit·WebSocket으로 소셜 로그인, 토론 탐색, 실시간 채팅·투표·AI 코칭 화면을 구현했습니다.</li>
+      <li>토론방 초기 정보와 과거 내역은 REST API로 먼저 조회하고, 채팅·턴 상태·투표만 WebSocket으로 분리해 진입 시 깜빡임과 순서 의존성을 줄였습니다.</li>
+      <li>2024 한이음 ICT멘토링 은상(정보통신기획평가원장상) 및 App Store·One Store 배포를 달성했습니다.</li>
+    </ul></article>
+    <article class="project"><h3>POPPET · 노약자를 위한 AI 말동무 서비스</h3><div class="meta">2025.05 · 프론트엔드 담당 · 기여도 100%</div><ul>
+      <li>Flutter·Dart·Riverpod·GoRouter·Dio·Retrofit·Secure Storage로 음성 대화, 인증, 보호자 설정 화면을 구현했습니다.</li>
+      <li>녹음·업로드·응답 대기·재생 상태를 분리해 사용자가 현재 처리 단계를 이해할 수 있도록 피드백 UI를 구성했습니다.</li>
+      <li>2025 GDG Solution Challenge에 참여한 크로스 플랫폼 팀 프로젝트입니다.</li>
+    </ul></article>
+    <p class="other">Other projects: 여행의 이유(React) · SSYUNG(React) · 식권대장 KOSA(Next.js/Firebase) · 상세 기술 기록은 포트폴리오에서 확인할 수 있습니다.</p>
+    <span class="page-number">김준하 · 2</span>
+  </main>
+</body>
+</html>

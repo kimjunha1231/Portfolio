@@ -6,7 +6,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   Briefcase, Award, GraduationCap,
-  BookOpen, CheckCircle2, ShieldCheck, FlameKindling, Terminal
+  BookOpen, CheckCircle2, ShieldCheck, FlameKindling, Terminal, Download
 } from "lucide-react";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -63,6 +63,24 @@ export default function InteractiveResume() {
             <h2 className="text-3xl md:text-5xl font-light tracking-tight mt-2 leading-none text-foreground">
               상세 <span className=" text-accent-blue font-semibold">이력</span>
             </h2>
+          </div>
+          <div className="md:col-span-4 flex flex-wrap gap-2 md:justify-end">
+            <a
+              href="/kim-junha-junior-developer-resume.pdf"
+              download
+              className="inline-flex items-center gap-2 rounded-md border border-accent-blue/30 px-3 py-2 text-xs font-semibold text-accent-blue transition-colors hover:bg-accent-blue/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              PDF 이력서
+            </a>
+            <a
+              href="/resume-2p.html"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-md border border-card-border px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-blue"
+            >
+              웹 이력서 보기
+            </a>
           </div>
         </div>
 
