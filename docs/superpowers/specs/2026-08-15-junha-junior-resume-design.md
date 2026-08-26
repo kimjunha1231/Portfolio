@@ -22,7 +22,8 @@
 
 - Figma 템플릿 안의 2페이지 신규 프레임
 - `output/pdf/kim-junha-junior-developer-resume.pdf`
-- `public/resume.html`의 인쇄용 2페이지 요약본
+- `public/kim-junha-junior-developer-resume.pdf`의 다운로드용 PDF
+- `public/resume-2p.html`의 인쇄용 2페이지 요약본
 
 ## 검증
 
