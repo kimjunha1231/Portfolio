@@ -122,7 +122,7 @@ StockFit은 현대그린푸드의 여러 판매 채널과 물류센터에 흩어
   </figure>
 </div>
 
-통합재고 동기화가 원천 데이터부터 화면까지 이어지는 과정은 [통합재고 동기화 흐름](/blog/integrated-inventory-sync-flow)에 별도로 정리했습니다. 조회 쿼리의 세부 최적화는 실제 측정값과 변경 코드를 기준으로 별도 글에서 다룰 예정입니다.
+통합재고 동기화가 원천 데이터부터 화면까지 이어지는 과정은 [통합재고 동기화 흐름](/blog/integrated-inventory-sync-flow)에, 후보 SKU를 먼저 줄이고 복합 인덱스·가용수량·예상 폐기수량을 조회에 반영한 과정은 [통합재고 조회 성능 최적화](/blog/integrated-inventory-query-optimization)에 정리했습니다. 두 글 모두 BackEnd·FrontEnd `develop` 코드와 실제 측정 캡처를 기준으로 작성했습니다.
 
 ### 2. 첫 화면을 늦추는 코드와 이미지 로딩 분리
 

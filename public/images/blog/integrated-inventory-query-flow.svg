@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="620" viewBox="0 0 1440 620" role="img" aria-labelledby="title desc">
+  <title id="title">통합재고 조회 성능 최적화 흐름</title>
+  <desc id="desc">검색과 필터로 후보를 만들고 SKU 단위 집계와 페이지를 먼저 확정한 뒤, 현재 페이지 상세와 예상 폐기 집계를 붙여 API와 화면에 전달하는 과정</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .label { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .note { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .box { fill: #eff6ff; stroke: #93c5fd; stroke-width: 2; }
+      .box2 { fill: #ecfdf5; stroke: #6ee7b7; stroke-width: 2; }
+      .box3 { fill: #fff7ed; stroke: #fdba74; stroke-width: 2; }
+      .arrow { stroke: #2563eb; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke-dasharray: 8 7; }
+    </style>
+  </defs>
+  <rect width="1440" height="620" rx="28" fill="#ffffff"/>
+  <text x="60" y="58" class="title">조회 범위를 먼저 줄인 뒤, 필요한 계산만 붙입니다</text>
+
+  <rect x="60" y="120" width="220" height="92" rx="18" class="box3"/>
+  <text x="170" y="158" text-anchor="middle" class="label">검색·필터 요청</text>
+  <text x="170" y="185" text-anchor="middle" class="note">채널·재고·위험 조건</text>
+
+  <rect x="340" y="120" width="220" height="92" rx="18" class="box"/>
+  <text x="450" y="158" text-anchor="middle" class="label">candidate_keys</text>
+  <text x="450" y="185" text-anchor="middle" class="note">SKU × 판매처 후보</text>
+
+  <rect x="620" y="120" width="220" height="92" rx="18" class="box"/>
+  <text x="730" y="158" text-anchor="middle" class="label">candidate_sku_agg</text>
+  <text x="730" y="185" text-anchor="middle" class="note">SKU 수량·위험도 집계</text>
+
+  <rect x="900" y="120" width="220" height="92" rx="18" class="box2"/>
+  <text x="1010" y="158" text-anchor="middle" class="label">paged_candidates</text>
+  <text x="1010" y="185" text-anchor="middle" class="note">정렬·OFFSET/FETCH</text>
+
+  <rect x="1180" y="120" width="200" height="92" rx="18" class="box2"/>
+  <text x="1280" y="158" text-anchor="middle" class="label">현재 페이지</text>
+  <text x="1280" y="185" text-anchor="middle" class="note">상세 집계만 실행</text>
+
+  <path d="M280 166 H340" class="arrow"/>
+  <path d="M560 166 H620" class="arrow"/>
+  <path d="M840 166 H900" class="arrow"/>
+  <path d="M1120 166 H1180" class="arrow"/>
+
+  <rect x="340" y="350" width="300" height="100" rx="18" class="box3"/>
+  <text x="490" y="389" text-anchor="middle" class="label">후보 SKU 전체</text>
+  <text x="490" y="417" text-anchor="middle" class="note">30일 예상 폐기 집계</text>
+
+  <rect x="700" y="350" width="300" height="100" rx="18" class="box2"/>
+  <text x="850" y="389" text-anchor="middle" class="label">countInventory·summary</text>
+  <text x="850" y="417" text-anchor="middle" class="note">같은 후보 필터 계약</text>
+
+  <rect x="1060" y="350" width="320" height="100" rx="18" class="box"/>
+  <text x="1220" y="389" text-anchor="middle" class="label">목록 API 응답</text>
+  <text x="1220" y="417" text-anchor="middle" class="note">프론트 표·모바일 카드</text>
+
+  <path d="M450 212 V300 H490 V350" class="arrow dashed"/>
+  <path d="M450 212 V270 H850 V350" class="arrow dashed"/>
+  <path d="M1280 212 V290 H1220 V350" class="arrow"/>
+  <path d="M640 400 H1060" class="arrow dashed"/>
+  <path d="M1000 400 H1060" class="arrow dashed"/>
+
+  <text x="60" y="530" class="note">핵심: 상세 JSON·LOT·정책·가격은 페이지 확정 뒤 읽지만, expected_disposal_qty 정렬을 위해 disposal_by_sku는 후보 단계에서 먼저 계산합니다.</text>
+</svg>

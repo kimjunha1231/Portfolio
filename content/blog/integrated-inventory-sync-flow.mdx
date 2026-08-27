@@ -12,11 +12,11 @@ coverFit: "contain"
 description: "동기화 버튼 클릭 이후 요청 식별, 중복 실행 방지, 커밋 후 비동기 워커, 원천 정규화, changed-only canonical 반영, 위험 판정, 스냅샷 생성, 프론트엔드 폴링까지 실제 StockFit 코드의 실행 순서를 따라 설명합니다."
 ---
 
-> StockFit 통합재고 개발 기록 · 동기화 실행 흐름
+> StockFit 통합재고 개발 기록 1편 · 동기화 버튼 뒤에서 실제로 일어나는 일
 
 ## 이 글에서 먼저 확인할 것
 
-동기화 버튼은 클릭 한 번으로 끝나는 기능처럼 보이지만, 실제로는 다음 순서를 거칩니다.
+화면에서는 버튼 한 번으로 보이지만, 서버에서는 다음 순서로 작업이 이어집니다.
 
 1. 프론트엔드가 실행 요청을 만들고 중복 요청을 구분합니다.
 2. 백엔드가 실행을 바로 수행하지 않고 `QUEUED` 상태로 접수합니다.
@@ -27,7 +27,18 @@ description: "동기화 버튼 클릭 이후 요청 식별, 중복 실행 방지
 7. 커밋 후 대시보드와 통계 스냅샷을 별도 작업으로 생성합니다.
 8. 프론트엔드가 실행 상태와 스냅샷 상태를 폴링하고, 준비된 데이터만 다시 조회합니다.
 
-여기서 `canonical`은 “네 원천 테이블을 물리적으로 하나로 합친 테이블”이 아닙니다. 원천마다 다른 컬럼과 표현을 서비스 내부의 공통 의미로 맞춘 뒤, 이미 나뉘어 있는 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE` 등에 반영한다는 뜻입니다.
+여기서 `canonical`은 네 원천 테이블을 물리적으로 하나로 합친 테이블이 아닙니다. 원천마다 이름과 표현이 다른 값을 같은 의미로 맞춘 뒤, 이미 나뉘어 있는 `PRODUCT`, `SKU`, `LOT`, `INVENTORY_BALANCE`에 저장한다는 뜻입니다.
+
+### 용어를 먼저 짧게 정리하면
+
+| 용어 | 이 글에서의 뜻 |
+| --- | --- |
+| `canonical` | 여러 원천의 값을 서비스가 공통으로 읽는 기준 데이터 |
+| 멱등성 | 같은 요청을 여러 번 보내도 같은 실행을 가리키게 하는 성질 |
+| 비관적 락 | 동시에 들어올 수 있다고 보고 DB 행을 먼저 잠그는 방식 |
+| `record_hash` | 원천 행의 현재 내용을 요약한 값 |
+| `fencingToken` | 오래된 워커의 늦은 쓰기를 막는 실행 세대 번호 |
+| 스냅샷 | 특정 시점의 대시보드·통계 결과를 저장한 작업 결과 |
 
 ### 기준 버전과 작업 트리 구분
 
@@ -38,35 +49,20 @@ description: "동기화 버튼 클릭 이후 요청 식별, 중복 실행 방지
 | 병합된 기준 | BackEnd `develop` `fb9d384`, FrontEnd `develop` `3d1bf57` | `develop` 기준 |
 | 아직 커밋되지 않은 변경 | BackEnd 위험 정책·판정 코드, FrontEnd 위험 표시 코드 | 현재 작업 트리 |
 
-현재 작업 트리에는 위험 규칙 `v1.7.0`이 들어와 있지만 `develop`의 정책 문서는 `v1.6.0`입니다. 따라서 위험 판정 절에서는 “현재 작업 트리에서 확인한 변경”과 “develop에 이미 병합된 동작”을 구분합니다. 병합되지 않은 코드를 배포 완료처럼 쓰지 않습니다.
+현재 작업 트리에는 위험 규칙 `v1.7.0`이 들어와 있지만 `develop`의 정책 문서는 `v1.6.0`입니다. 그래서 위험 판정 절에서는 이미 `develop`에 들어간 동작과 아직 작업 트리에만 있는 동작을 구분해 적습니다. 작업 트리의 변경을 배포 완료처럼 설명하지 않습니다.
 
 ## 0. 전체 흐름을 먼저 그림으로 보기
 
-```mermaid
-sequenceDiagram
-    participant User as 사용자
-    participant FE as 프론트엔드
-    participant API as 동기화 제출 API
-    participant Worker as 동기화 워커
-    participant Canonical as canonical publish
-    participant Risk as 위험 판정
-    participant Snapshot as 대시보드·통계 스냅샷
-
-    User->>FE: 동기화 버튼 클릭
-    FE->>API: clientRequestId와 함께 POST
-    API->>API: guard 행 잠금·중복 확인·활성 실행 확인
-    API-->>FE: 202 Accepted + QUEUED run
-    API->>Worker: 트랜잭션 커밋 후 실행 등록
-    Worker->>Worker: 원천 4종을 500건씩 읽고 정규화
-    Worker->>Canonical: changed-only MERGE
-    Canonical->>Risk: LOT·재고·예측·정책으로 위험 판정
-    Canonical->>Snapshot: 커밋 후 스냅샷 task 실행
-    FE->>API: run 상세 폴링
-    API-->>FE: 실행·스냅샷 상태
-    FE->>FE: 준비된 목록·상세·집계 캐시 갱신
-```
-
-이 도식은 실행 순서를 보여주는 개념도입니다. 처리 시간이나 처리량을 측정한 결과를 의미하지는 않습니다.
+<figure className="not-prose my-6">
+  <ZoomableImage
+    src="/images/blog/integrated-inventory-sync-sequence.svg"
+    alt="사용자가 동기화 버튼을 누른 뒤 프론트엔드, 제출 API, 워커, canonical 반영, 위험 판정, 대시보드·통계 스냅샷을 거쳐 화면 캐시가 갱신되는 실행 순서"
+    loading="lazy"
+    decoding="async"
+    className="h-auto w-full rounded-2xl border border-card-border bg-foreground/5"
+  />
+  <figcaption>동기화 버튼 클릭부터 최신 목록·상세·집계가 화면에 반영되기까지의 순서입니다. 처리 시간이나 처리량을 측정한 결과는 아닙니다.</figcaption>
+</figure>
 
 <figure className="not-prose my-6">
   <ZoomableImage
@@ -79,13 +75,13 @@ sequenceDiagram
   <figcaption>통합재고 동기화의 전체 책임 경계와 데이터 흐름을 한눈에 볼 수 있도록 정리한 도식입니다.</figcaption>
 </figure>
 
-## 1. 버튼을 누른 순간: 화면 잠금만으로는 충분하지 않습니다
+## 1. 버튼을 누른 순간: 화면에서 버튼을 잠그는 것만으로는 부족합니다
 
-버튼을 빠르게 두 번 누르거나, 네트워크 응답이 늦어 사용자가 다시 누르거나, 다른 탭에서 동시에 실행할 수 있습니다. 프론트엔드의 `disabled`는 현재 화면에서만 동작하므로, 최종 중복 방어는 서버가 맡아야 합니다.
+버튼을 빠르게 두 번 누를 수 있고, 응답이 늦으면 사용자가 다시 누를 수도 있습니다. 다른 탭이나 다른 서버에서 같은 요청이 들어올 수도 있습니다. 프론트엔드의 `disabled`는 지금 보고 있는 화면에서만 동작하므로, 최종 중복 방어는 서버가 맡아야 합니다.
 
 ### 1.1 프론트엔드는 요청 식별자를 먼저 만듭니다
 
-`InventorySyncControl.jsx`는 요청마다 `clientRequestId`를 준비합니다. 아직 실행 결과를 모르는 `START_UNCERTAIN` 상태에서는 같은 키를 유지합니다. 전송은 됐지만 응답만 놓친 경우, 새 작업을 만드는 대신 원래 요청의 결과를 다시 찾기 위해서입니다.
+`InventorySyncControl.jsx`는 요청마다 `clientRequestId`를 준비합니다. 아직 실행 결과를 모르는 `START_UNCERTAIN` 상태에서는 같은 키를 유지합니다. 요청은 서버에 도착했지만 응답만 놓친 상황에서 새 작업을 만들지 않고, 원래 요청의 결과를 다시 찾기 위해서입니다.
 
 ```jsx
 const nextClientRequestId = NEW_REQUEST_UI_STATES.has(derivedUiState)
@@ -93,9 +89,9 @@ const nextClientRequestId = NEW_REQUEST_UI_STATES.has(derivedUiState)
   : clientRequestId;
 ```
 
-이미 `SUCCEEDED`나 `FAILED`로 끝난 실행에서 사용자가 새로 누르면 새 키를 만듭니다. 반대로 전송 결과가 불확실하면 기존 키를 재사용합니다.
+실행이 `SUCCEEDED`나 `FAILED`로 끝난 뒤 사용자가 다시 누르면 새 키를 만듭니다. 반대로 전송 결과가 불확실하면 기존 키를 그대로 사용합니다. 이 구분이 있어야 “새로 시작”과 “결과 다시 확인”을 나눌 수 있습니다.
 
-이 성질을 멱등성이라고 합니다. 같은 요청을 여러 번 보내도 서버가 같은 실행을 가리키게 만드는 성질입니다. 이 프로젝트에서 멱등 키는 서버가 만든 `syncRunId`와 구분됩니다.
+이런 성질을 멱등성이라고 합니다. 같은 요청을 여러 번 보내도 서버가 같은 실행을 가리키게 만드는 성질입니다. 여기서 `clientRequestId`는 요청을 구분하는 값이고, `syncRunId`는 서버가 저장한 실행 한 건의 ID입니다.
 
 | 값 | 의미 | 만들어지는 시점 |
 | --- | --- | --- |
@@ -122,15 +118,15 @@ public static String requestHash(InventorySyncStartRequest request) {
 }
 ```
 
-따라서 현재의 `requestHash`는 “여러 실행 옵션 전체를 해시한 값”이 아니라 `clientRequestId`를 저장한 값에 가깝습니다. 나중에 원천 범위, 기준일 같은 요청 필드가 추가된다면 해시 대상도 함께 넓혀야 합니다. 이 글에서는 현재 DTO에 실제로 존재하는 값만 설명합니다.
+따라서 현재 `requestHash`는 여러 실행 옵션 전체를 해시한 값이 아니라 `clientRequestId`를 해시한 값에 가깝습니다. 나중에 원천 범위나 기준일 같은 필드가 요청에 추가되면 해시 대상도 넓혀야 합니다. 이 글은 현재 DTO에 실제로 있는 값만 기준으로 설명합니다.
 
-## 2. 제출 API의 트랜잭션: 긴 작업을 HTTP 요청 안에서 기다리지 않습니다
+## 2. 제출 API의 트랜잭션: 긴 작업을 HTTP 응답까지 붙잡아 두지 않습니다
 
-버튼 요청은 동기화 전체를 끝낸 뒤 응답하지 않습니다. `QUEUED` 실행을 먼저 저장하고 `202 Accepted`를 반환합니다. `202`는 “요청을 받았고 처리를 시작할 수 있는 상태지만, 최종 결과는 아직 나오지 않았다”는 의미로 사용됩니다.
+버튼 요청은 동기화가 끝날 때까지 기다렸다가 응답하지 않습니다. 먼저 실행을 `QUEUED` 상태로 저장하고 `202 Accepted`를 반환합니다. `202`는 “요청은 받았지만 최종 결과는 아직 나오지 않았다”는 뜻입니다.
 
 ### 2.1 서버가 접수할 때 확인하는 순서
 
-`InventorySyncSubmissionService.submitInternal()`의 핵심 순서는 다음과 같습니다.
+`InventorySyncSubmissionService.submitInternal()`이 접수할 때 확인하는 순서는 다음과 같습니다.
 
 1. 요청자 ID가 유효한지 확인합니다.
 2. `inventory_source_state`의 고정 guard 행을 `FOR UPDATE WAIT 5`로 잠급니다.
@@ -141,7 +137,7 @@ public static String requestHash(InventorySyncStartRequest request) {
 7. 트랜잭션 커밋 이후 워커를 깨우도록 등록합니다.
 8. 프론트엔드에 `202`와 실행 정보를 반환합니다.
 
-서버 쪽 로직을 간단히 줄이면 다음과 같습니다.
+한 줄로 줄이면 다음과 같습니다.
 
 ```text
 guard 행 잠금
@@ -154,9 +150,9 @@ guard 행 잠금
 
 ### 2.2 비관적 락은 왜 사용하는가
 
-비관적 락은 “다른 요청이 동시에 들어올 수 있다”고 보고 DB 행을 먼저 잠그는 방식입니다. 이 프로젝트는 제출 경쟁을 직렬화하기 위해 고정된 source-state 행을 잠급니다. Oracle에서 5초 안에 잠금을 얻지 못하면 `InventorySyncLockSupport`가 잠금 대기 오류를 동기화 충돌 응답으로 바꿉니다.
+비관적 락은 “지금 다른 요청도 들어올 수 있다”고 보고 DB 행을 먼저 잠그는 방식입니다. 이 프로젝트는 동기화 제출이 겹치지 않도록 고정된 source-state 행을 잠급니다. Oracle에서 5초 안에 잠금을 얻지 못하면 `InventorySyncLockSupport`가 잠금 대기 오류를 동기화 충돌 응답으로 바꿉니다.
 
-프론트엔드 버튼을 잠그는 것과 역할이 다릅니다.
+화면의 버튼을 잠그는 것과는 막는 범위가 다릅니다.
 
 | 방어 위치 | 막는 문제 | 한계 |
 | --- | --- | --- |
@@ -164,11 +160,11 @@ guard 행 잠금
 | 백엔드 비관적 락 | 동시에 제출하는 서버 요청 | 잠금 대기와 타임아웃을 처리해야 함 |
 | DB 유니크 제약 | 마지막 중복 삽입 | 사용자에게 친절한 상태를 만들기 어렵고 예외 처리가 필요함 |
 
-이 프로젝트는 세 번째 방어선으로 `active_scope_key` 유니크 제약도 유지합니다. 애플리케이션 확인과 DB 제약을 함께 두어 한쪽 판단이 놓친 경쟁을 막습니다.
+이 프로젝트는 세 번째 방어선으로 `active_scope_key` 유니크 제약도 유지합니다. 애플리케이션 확인과 DB 제약을 같이 두어 한쪽이 놓친 동시 실행도 막습니다.
 
 ## 3. 왜 `QUEUED`를 저장한 뒤 커밋 후 워커를 시작할까
 
-실행 행을 저장하는 트랜잭션이 끝나기 전에 비동기 워커를 시작하면, 워커가 아직 커밋되지 않은 실행 행을 읽지 못할 수 있습니다. 그러면 사용자는 `202`를 받았는데 워커는 실행 ID를 찾지 못하는 상황이 생깁니다.
+실행 행을 DB에 저장하는 트랜잭션이 끝나기 전에 비동기 워커를 시작하면 문제가 생길 수 있습니다. 워커가 아직 커밋되지 않은 실행 행을 읽으려고 하면, 사용자는 `202`를 받았는데 워커는 실행 ID를 찾지 못할 수 있습니다.
 
 그래서 제출 서비스는 `TransactionSynchronizationManager`에 `afterCommit` 콜백을 등록합니다.
 
@@ -183,9 +179,9 @@ TransactionSynchronizationManager.registerSynchronization(new TransactionSynchro
 });
 ```
 
-여기서 핵심은 비동기라는 단어 자체가 아닙니다. “워커가 읽을 durable한 실행 행이 먼저 저장되어야 한다”는 순서입니다. `durable`은 메모리 변수에만 남아 있지 않고 DB에 저장되어 재시작 뒤에도 다시 찾을 수 있다는 뜻입니다.
+핵심은 워커를 “언제” 시작하느냐입니다. 워커가 읽을 실행 행을 먼저 DB에 커밋해야 합니다. 여기서 `durable`은 메모리에 잠깐만 있는 값이 아니라 DB에 남아 있어서 서버가 재시작해도 다시 찾을 수 있다는 뜻입니다.
 
-워커 큐가 가득 차 `launch()`가 실패하면 실행 행을 조용히 잃지 않고 `markLaunchFailed()` 경로로 실패를 기록합니다. 사용자가 계속 로딩 화면만 보지 않도록 실행 상태를 남기는 구조입니다.
+워커 큐가 가득 차 `launch()`가 실패해도 실행 행을 조용히 버리지 않습니다. `markLaunchFailed()`로 실패 상태를 기록해 사용자가 계속 로딩 화면만 보지 않게 합니다.
 
 ## 4. 원천 데이터 읽기: 네 테이블을 한 번에 UNION하지 않습니다
 
@@ -200,7 +196,7 @@ TransactionSynchronizationManager.registerSynchronization(new TransactionSynchro
 
 ### 4.1 실제 정규화 위치는 SQL projection입니다
 
-원천별 컬럼명을 같은 결과 컬럼으로 맞추는 일은 `InventorySyncSourcePageMapper.xml`의 `<choose>` projection에서 수행합니다. 예를 들어 이커머스의 `sellable_quantity`와 물류센터의 `physical_available_qty`가 둘 다 `on_hand_qty`라는 결과 별칭으로 나옵니다.
+원천마다 컬럼명이 다르기 때문에, 읽어 올 때부터 같은 이름으로 맞춥니다. 이 작업은 `InventorySyncSourcePageMapper.xml`의 `<choose>` projection에서 합니다. 예를 들어 이커머스의 `sellable_quantity`와 물류센터의 `physical_available_qty`가 모두 `on_hand_qty`라는 이름으로 나옵니다.
 
 ```sql
 -- ECOMMERCE
@@ -212,7 +208,7 @@ physical_available_qty AS on_hand_qty,
 physical_reserved_qty AS reserved_qty
 ```
 
-따라서 Java의 Source Adapter가 원천 컬럼을 모두 다시 번역하는 구조는 아닙니다. SQL이 DB에서 조인과 컬럼 정규화를 끝내 `CanonicalInventoryRecord`로 투영하고, Java 어댑터는 `sourceType`이 맞는지 확인한 뒤 버퍼에 넣는 계약을 담당합니다.
+따라서 Java의 Source Adapter가 원천 컬럼을 하나씩 다시 번역하는 구조는 아닙니다. SQL이 DB에서 조인과 컬럼 정규화를 끝내 `CanonicalInventoryRecord` 모양으로 만들고, Java 어댑터는 `sourceType`이 맞는지 확인한 뒤 버퍼에 넣습니다.
 
 ```java
 default void accept(CanonicalInventoryRecord record, InventorySyncAttemptBuffer buffer) {
@@ -223,7 +219,7 @@ default void accept(CanonicalInventoryRecord record, InventorySyncAttemptBuffer 
 }
 ```
 
-이 구분을 놓치면 “어댑터가 모든 데이터 변환을 한다”고 잘못 이해하게 됩니다. 현재 구현의 책임은 다음과 같습니다.
+정리하면 현재 구현의 역할은 다음과 같습니다.
 
 ```text
 MyBatis projection
@@ -250,11 +246,11 @@ ORDER BY m.source_record_key
 FETCH NEXT #{limit} ROWS ONLY
 ```
 
-이 방식은 페이지를 읽는 동안 앞쪽 데이터가 바뀌어도 이미 읽은 키보다 뒤를 기준으로 이어갈 수 있다는 장점이 있습니다. 대신 `source_record_key`가 안정적으로 정렬되고, 원천 버전을 실행 중 고정해야 합니다. 워커는 원천별 `current_version`이 읽기 시작 후 바뀌었는지도 마지막에 확인합니다. 버전이 달라지면 `SOURCE_CHANGED`로 중단합니다.
+이 방식은 페이지를 읽는 중 앞쪽 데이터가 바뀌어도, “마지막으로 읽은 키 다음부터” 이어갈 수 있다는 장점이 있습니다. 대신 `source_record_key`가 안정적으로 정렬되어야 하고, 실행 중에는 원천 버전을 고정해야 합니다. 워커는 읽기 시작 뒤 `current_version`이 바뀌었는지도 마지막에 확인하고, 달라졌다면 `SOURCE_CHANGED`로 중단합니다.
 
 ## 5. canonical에 넣기 전: 매핑과 입력을 먼저 닫습니다
 
-원천 행을 읽었다고 바로 정식 테이블을 수정하지 않습니다. 실행 전에 매핑이 유효한지 검사합니다.
+원천 행을 읽었다고 바로 정식 테이블을 수정하지 않습니다. 먼저 “이 원천 행이 어느 canonical 데이터를 가리키는지” 매핑이 맞는지 확인합니다.
 
 `countInvalidOrUnmapped()`는 다음 종류를 찾습니다.
 
@@ -263,11 +259,11 @@ FETCH NEXT #{limit} ROWS ONLY
 - row map은 있지만 원천 current 행이 사라진 경우
 - 여러 원천 행이 하나의 `inventory_balance_id`를 서로 다르게 가리키는 경우
 
-이 검사는 데이터가 일부만 반영된 뒤 실패하는 상황을 줄입니다. 특히 이름이 비슷한 상품을 실행 중 추측하지 않고, 미리 승인된 `inventory_source_row_map`에 연결된 대상만 사용합니다.
+이 검사는 일부 데이터만 바뀐 뒤 실패하는 상황을 줄입니다. 이름이 비슷하다는 이유로 실행 중 대상을 추측하지 않고, 미리 연결해 둔 `inventory_source_row_map`의 대상만 사용합니다.
 
 ### 5.1 `CanonicalInventoryRecord`는 내부 입력 경계입니다
 
-`CanonicalInventoryRecord` 생성자는 정식 테이블에 쓰기 전의 최소 규칙을 검사합니다.
+`CanonicalInventoryRecord`는 정식 테이블에 쓰기 직전의 입력 경계입니다. 생성할 때 기본적인 값부터 확인합니다.
 
 - 필수 식별자가 비어 있지 않은지
 - 수량이 음수가 아닌지
@@ -275,11 +271,11 @@ FETCH NEXT #{limit} ROWS ONLY
 - `sourceVersion`, `rowVersion`이 양수인지
 - 가격·원가·정책이 연결된 경우 해당 값이 유효한지
 
-이 객체를 “통합재고 테이블”로 오해하면 안 됩니다. 실행 중 여러 원천 행을 같은 타입으로 보관하는 메모리 경계입니다.
+이 객체 자체가 “통합재고 테이블”은 아닙니다. 여러 원천 행을 같은 모양으로 들고 있다가 다음 단계로 넘기는 메모리상의 입력 객체입니다.
 
 ## 6. 왜 바뀐 행만 반영하는가: `record_hash`와 `synced_record_hash`
 
-원천 데이터가 3만 건 이상이어도 매번 모든 canonical 행을 업데이트할 필요는 없습니다. 원천 current 행에는 `record_hash`, 마지막으로 반영한 해시에는 `synced_record_hash`를 둡니다.
+원천 데이터가 3만 건 이상이어도 매번 모든 canonical 행을 다시 쓸 필요는 없습니다. 원천 행의 현재 내용은 `record_hash`로, 마지막으로 반영한 내용은 `synced_record_hash`로 기억해 둡니다.
 
 ```text
 record_hash        = 현재 원천 행의 내용 지문
@@ -299,7 +295,7 @@ AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash
 
 ### 6.1 `updated_at`을 원천 변경 감지의 기준으로 쓰지 않은 이유
 
-`updated_at`만 비교하면 “값은 같지만 저장 시각만 바뀐 행”을 변경으로 오인할 수 있습니다. 반대로 외부 적재 과정의 시계 정밀도나 갱신 방식에 따라 값이 바뀌었는데 시간이 신뢰하기 어려운 경우도 있습니다. 현재 구현은 행 내용 기반 `record_hash`를 변경 감지에 사용합니다.
+`updated_at`만 비교하면 값은 그대로인데 저장 시각만 바뀐 행을 변경된 것으로 볼 수 있습니다. 반대로 외부 적재 방식에 따라 값은 바뀌었는데 시각이 제대로 갱신되지 않을 수도 있습니다. 그래서 현재 구현은 행의 실제 내용에서 만든 `record_hash`를 변경 감지에 사용합니다.
 
 그렇다고 `updated_at`을 전혀 사용하지 않는 것은 아닙니다.
 
@@ -310,7 +306,7 @@ AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash
 | 수요예측 같은 동일 행의 값 변경 감지 | 현재 작업 트리 `v1.7.0`에서 forecast `updated_at` 비교 |
 | 판정 시점 고정 | 실행 시작 시각 `startedAt`을 `assessmentInstant`로 전달 |
 
-즉 `updated_at`은 변경 신호 하나로 모든 문제를 해결하는 필드가 아니라, 데이터마다 의미가 다른 보조 정보입니다.
+즉 `updated_at` 하나로 모든 변경을 판단하지 않습니다. 데이터 종류에 따라 “마지막으로 갱신된 시각”이라는 보조 정보로 사용합니다.
 
 ### 6.2 canonical MERGE도 실제 값이 다를 때만 갱신합니다
 
@@ -326,11 +322,11 @@ WHERE NVL(target.on_hand_qty, -1) != NVL(source.on_hand_qty, -1)
    OR NVL(target.reserved_qty, -1) != NVL(source.reserved_qty, -1)
 ```
 
-이렇게 해야 변경이 없는 실행이 모든 행의 감사 시각을 새로 쓰는 일을 피할 수 있습니다.
+이렇게 하면 값이 그대로인 실행 때문에 모든 행의 감사 시각이 새로 바뀌는 일을 막을 수 있습니다.
 
 ## 7. publish 트랜잭션: 참조 데이터와 재고를 500건씩 쓰되, 게시 경계는 하나입니다
 
-`InventorySyncPublisher.publish()`는 한 번의 publish를 `@Transactional`로 묶습니다. 내부에서는 500건씩 나누지만, 이것은 메모리와 SQL 파라미터 크기를 관리하기 위한 배치 단위이지, 사용자가 보는 성공 상태를 중간 성공으로 나누는 경계가 아닙니다.
+`InventorySyncPublisher.publish()`는 한 번의 publish를 `@Transactional`로 묶습니다. 안에서는 500건씩 나눠 쓰지만, 500건마다 사용자에게 “성공”을 알리는 구조는 아닙니다. 500건은 메모리와 SQL 파라미터 크기를 관리하기 위한 배치 단위입니다.
 
 ### 7.1 실제 반영 순서
 
@@ -361,11 +357,11 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 }
 ```
 
-`fencingToken`은 오래된 워커가 뒤늦게 쓰기를 이어가지 못하도록 하는 실행 세대 번호입니다. 실행이 복구되거나 새 시도가 시작되면 이전 워커의 쓰기를 거절할 수 있습니다.
+`fencingToken`은 실행 세대를 나타내는 번호입니다. 작업이 복구되거나 새 시도가 시작된 뒤 예전 워커가 늦게 돌아와도, 이 번호가 다르면 쓰기를 거절합니다.
 
 ### 7.2 중간 batch가 실패하면 어떻게 되는가
 
-정책과 코드의 의도는 canonical 반영·LOT 상태 갱신·위험 판정 저장을 하나의 게시 트랜잭션으로 묶는 것입니다. 중간 SQL이 실패하면 현재 새 run의 publish는 rollback되고, 이전 성공 데이터가 남습니다. 실행 자체는 `FAILED`로 기록합니다.
+코드의 의도는 canonical 반영, LOT 상태 갱신, 위험 판정 저장을 하나의 게시 트랜잭션으로 처리하는 것입니다. 중간 SQL에서 오류가 나면 이번 publish는 rollback되고 이전에 성공한 데이터가 남습니다. 실행 상태는 `FAILED`로 기록합니다.
 
 여기서 500건 단위와 하나의 트랜잭션은 모순이 아닙니다.
 
@@ -379,11 +375,11 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 
 ## 8. 재고 상태와 위험 판정: 어떤 값을 어떻게 계산하는가
 
-이 절의 `v1.7.0` 설명은 현재 작업 트리의 `BackEnd/docs/inventory-risk-grade-policy.md`와 변경된 `RiskRuleEngine`을 기준으로 합니다. `develop`에 병합된 최종 정책으로 단정하지 않습니다.
+이 절의 `v1.7.0` 설명은 현재 작업 트리의 `BackEnd/docs/inventory-risk-grade-policy.md`와 변경된 `RiskRuleEngine`을 기준으로 합니다. 아직 `develop`에 병합된 최종 정책이라고 단정하지 않습니다.
 
 ### 8.1 판정 단위는 `SKU × 판매처`입니다
 
-같은 SKU라도 판매처별 안전재고와 수요예측이 다를 수 있으므로, 위험 판정은 `SKU × 판매처` scope로 계산합니다.
+같은 SKU라도 판매처마다 안전재고와 수요예측이 다를 수 있습니다. 그래서 위험 판정은 `SKU × 판매처` 단위(scope)로 계산합니다. 여기서 scope는 “이번에 함께 계산할 한 묶음”이라는 뜻입니다.
 
 - `stock_sales_point_id` 또는 `allocated_sales_point_id`가 있으면 해당 판매처 재고로 봅니다.
 - 둘 다 없으면 물류센터 미할당 재고인 `UNASSIGNED` scope로 둡니다.
@@ -391,7 +387,7 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 
 ### 8.2 LOT 상태는 원천 상태를 그대로 믿지 않고 다시 계산합니다
 
-현재 작업 트리는 원천의 `lot_status`를 그대로 최종 상태로 사용하지 않습니다. 기준일과 날짜, 같은 LOT의 통합 잔량으로 다음 상태를 정합니다.
+현재 작업 트리는 원천의 `lot_status`를 그대로 최종 상태로 쓰지 않습니다. 판정 기준일, 날짜, 같은 LOT의 통합 잔량을 다시 확인해 최종 상태를 정합니다.
 
 ```text
 expiryDate <= 판정일 또는 saleStopDate <= 판정일
@@ -407,7 +403,7 @@ on_hand_qty + reserved_qty == 0
   → AVAILABLE
 ```
 
-`effectiveEndDate = min(expiryDate, saleStopDate)`라는 표현으로 생각하면 쉽습니다. 다만 날짜가 같을 때는 `EXPIRED`를 우선하는 tie-break가 있습니다.
+`effectiveEndDate = min(expiryDate, saleStopDate)`라고 생각하면 됩니다. 두 날짜가 같을 때 어떤 상태를 고를지 정한 tie-break 규칙은 `EXPIRED` 우선입니다.
 
 판매 불가 LOT의 `on_hand_qty`는 판매 가능 재고에서 제외합니다.
 
@@ -420,7 +416,7 @@ availableQty
 
 ### 8.3 수요예측은 사용할 수 있는지 먼저 판정합니다
 
-현재 작업 트리의 규칙은 다음 예측만 사용합니다.
+현재 작업 트리는 아래 조건을 만족하는 수요예측만 사용합니다.
 
 - 판정일 당일 `base_date`를 우선합니다.
 - 당일 예측이 없으면 전일까지만 허용합니다.
@@ -433,7 +429,7 @@ availableQty
 
 ### 8.4 30일 예상 폐기량은 판매 종료일까지 남은 수요를 비교합니다
 
-30일 이내 판매가 종료되는 `AVAILABLE` LOT만 대상으로 합니다. 이미 `EXPIRED`, `SALE_STOPPED`, `DEPLETED`인 LOT는 대상에서 제외합니다.
+30일 안에 판매가 끝나는 `AVAILABLE` LOT만 대상으로 합니다. 이미 `EXPIRED`, `SALE_STOPPED`, `DEPLETED`인 LOT는 계산에서 뺍니다.
 
 ```text
 S(t) = t일까지 판매 종료되는 LOT 수량의 누적합
@@ -444,7 +440,7 @@ E30 = D(30)
 R30 = E30 / availableQty × 100
 ```
 
-예측 지점은 D+7, D+14, D+30이고, 그 사이 날짜는 코드의 선형 보간으로 계산합니다. `R30`은 실제 폐기율이나 ESG 공시 수치가 아니라, 현재 수요예측과 판매 종료일을 이용한 운영 우선순위용 예상치입니다.
+예측 지점은 D+7, D+14, D+30입니다. 그 사이 날짜는 코드의 선형 보간으로 채웁니다. `R30`은 실제 폐기율이나 ESG 공시 수치가 아니라, 현재 수요예측과 판매 종료일을 이용해 우선순위를 정하는 예상치입니다.
 
 현재 작업 트리에는 D+90까지의 중기·장기 지표도 추가되어 있습니다.
 
@@ -460,7 +456,7 @@ X90 = max(0, remainingSellable(90) - safetyStockQty)
 
 ### 8.5 여러 위험이 동시에 있으면 대표 사유를 하나로 정합니다
 
-엔진은 재고 부족, 안전재고 미달, 예상 폐기, LOT 제외, 예측 품질을 각각 계산한 뒤 심각도가 가장 높은 영역을 최종 등급으로 선택합니다.
+엔진은 재고 부족, 안전재고 미달, 예상 폐기, LOT 제외, 예측 품질을 각각 계산합니다. 여러 조건이 동시에 맞으면 그중 심각도가 가장 높은 조건을 최종 등급으로 고릅니다.
 
 | 조건 | 등급 |
 | --- | --- |
@@ -474,11 +470,11 @@ X90 = max(0, remainingSellable(90) - safetyStockQty)
 | 예상 폐기율 5% 이상 | `CAUTION` |
 | 중기 추가 폐기율 또는 90일 후 안전재고 초과율 20% 이상 | `CAUTION` |
 
-최종 등급은 `CRITICAL > WARNING > NORMAL > GOOD` 순서로 고르고, API 응답에서는 `DANGER`, `CAUTION`, `NORMAL`, `SAFE`로 변환합니다. 같은 심각도라면 고정된 사유 우선순위로 `reason_message` 한 건을 선택합니다.
+최종 등급은 `CRITICAL > WARNING > NORMAL > GOOD` 순서로 고릅니다. API 응답으로 보낼 때는 `DANGER`, `CAUTION`, `NORMAL`, `SAFE`로 바꿉니다. 같은 심각도의 조건이 여러 개면 정해 둔 우선순위에 따라 `reason_message` 하나를 선택합니다.
 
 ### 8.6 왜 위험 판정 시각을 하나로 고정하는가
 
-동기화가 자정을 넘길 수 있는데 LOT 상태는 23:59 기준, 위험 사유는 00:01 기준으로 계산하면 한 run 안에 서로 다른 날짜가 섞입니다. 현재 작업 트리는 run의 `startedAt`을 `assessmentInstant`로 전달하고, 서울 기준일도 그 시각에서 계산합니다.
+동기화가 자정을 넘길 수 있습니다. LOT 상태는 23:59, 위험 사유는 00:01 기준으로 계산하면 한 run 안에 서로 다른 날짜가 섞입니다. 그래서 현재 작업 트리는 run의 `startedAt`을 `assessmentInstant`로 넘기고, 서울 기준일도 그 시각에서 계산합니다.
 
 ```text
 run.startedAt
@@ -487,7 +483,7 @@ run.startedAt
   → LOT 상태·E30/R30·등급·사유·스냅샷 기준
 ```
 
-이 값은 계산 편의를 위한 시각이 아니라, 한 번의 동기화가 어떤 시점의 데이터였는지 재현하기 위한 기준입니다.
+이 시각은 계산을 편하게 하려고 넣은 값이 아닙니다. 한 번의 동기화가 어느 시점의 데이터였는지 나중에 다시 확인하기 위한 기준입니다.
 
 ### 8.7 `reason_message`는 프론트에서 다시 만들지 않습니다
 
@@ -519,31 +515,31 @@ scopesToEvaluate
 
 ## 10. canonical 커밋 뒤 대시보드와 통계 스냅샷을 만듭니다
 
-대시보드와 통계는 canonical publish 트랜잭션 안에서 바로 계산하지 않습니다. 먼저 snapshot task 행을 저장한 다음, canonical 커밋 이후 별도 executor가 작업을 시작합니다.
+대시보드와 통계는 canonical publish 트랜잭션 안에서 바로 계산하지 않습니다. 먼저 snapshot task 행만 저장하고, canonical 커밋이 끝난 뒤 별도 executor가 실제 집계를 시작합니다.
 
-```mermaid
-flowchart LR
-    A[canonical·LOT·risk publish] --> B{변경 있음?}
-    B -- 아니오 --> C[스냅샷 task·자동 재조회 생략]
-    B -- 예 --> D[dashboard task + statistics task 저장]
-    D --> E[트랜잭션 commit]
-    E --> F[각 task 독립 실행]
-    F --> G[READY 또는 FAILED]
-    G --> H[프론트가 준비된 집계만 invalidate]
-```
+<figure className="not-prose my-6">
+  <ZoomableImage
+    src="/images/blog/integrated-inventory-snapshot-flow.svg"
+    alt="canonical과 위험 판정 publish 뒤 변경 여부에 따라 스냅샷 task를 저장하고 커밋 후 독립 실행한 다음 준비된 집계만 갱신하는 흐름"
+    loading="lazy"
+    decoding="async"
+    className="h-auto w-full rounded-2xl border border-card-border bg-foreground/5"
+  />
+  <figcaption>canonical 반영이 끝난 뒤 대시보드·통계 스냅샷을 별도 task로 처리하는 순서입니다.</figcaption>
+</figure>
 
-현재 `InventorySyncSnapshotCoordinator`는 대시보드와 재고 통계를 서로 다른 executor에서 실행합니다. task에는 소유자와 lease가 있어, 프로세스가 재시작되거나 일시적인 DB 오류가 나면 recovery 경로가 다시 실행할 수 있습니다.
+현재 `InventorySyncSnapshotCoordinator`는 대시보드와 재고 통계를 서로 다른 executor에서 실행합니다. task에는 담당자와 lease가 기록됩니다. 프로세스가 재시작되거나 일시적인 DB 오류가 나도 recovery 경로가 다시 작업을 잡을 수 있습니다.
 
-이 분리를 선택한 이유는 두 가지입니다.
+이렇게 나눈 이유는 두 가지입니다.
 
 1. canonical 데이터가 커밋되기 전에 대시보드가 새 값을 읽는 상황을 피합니다.
 2. 대시보드 집계 실패가 재고 canonical publish 전체를 rollback시키지 않도록 합니다.
 
-반대로 “항상 최신 집계까지 끝난 뒤 동기화 성공”으로 묶으면 화면 일관성은 단순해지지만, 집계 시간이 길거나 한 집계만 실패했을 때 원천 동기화까지 실패로 보이게 됩니다. 현재 구현은 canonical publish 성공과 snapshot 준비 상태를 분리해 보여줍니다.
+반대로 “집계까지 모두 끝나야 동기화 성공”으로 묶으면 화면 상태는 단순해집니다. 하지만 집계가 오래 걸리거나 한 집계만 실패해도 원천 동기화까지 실패한 것처럼 보입니다. 현재 구현은 canonical publish 성공과 snapshot 준비 상태를 따로 보여줍니다.
 
 ## 11. 프론트엔드는 마지막에 상태를 폴링하고 화면을 갱신합니다
 
-프론트엔드는 원천 행을 계속 조회하지 않습니다. 실행 상태를 담은 `latest`와 특정 run의 상세만 확인합니다.
+프론트엔드는 동기화가 끝날 때까지 원천 행 전체를 반복해서 읽지 않습니다. 실행 상태를 담은 `latest`와 특정 run의 상세만 확인합니다.
 
 ### 11.1 상태별 폴링 간격
 
@@ -564,11 +560,11 @@ const POLL_INTERVAL_BY_STATUS_MS = Object.freeze({
 });
 ```
 
-`latest`는 포커스와 재연결 때 확인하고, 실행 ID를 찾은 뒤에는 해당 run 상세 쿼리 하나가 반복 추적을 담당합니다. 같은 실행을 latest와 detail이 동시에 계속 폴링하지 않도록 한 구조입니다.
+`latest`는 화면에 다시 들어오거나 연결이 끊겼다가 돌아왔을 때 확인합니다. 실행 ID를 찾으면 그 뒤에는 해당 run 상세 쿼리 하나만 반복합니다. 같은 실행을 `latest`와 detail에서 동시에 폴링하지 않도록 한 것입니다.
 
 ### 11.2 성공했다고 바로 모든 캐시를 갱신하지 않습니다
 
-run이 `SUCCEEDED`이고 `changedCount > 0`이면 프론트엔드는 0~3초의 작은 지연 뒤 다음 쿼리를 invalidate합니다.
+run이 `SUCCEEDED`이고 `changedCount > 0`이면 프론트엔드는 0~3초 뒤 다음 쿼리를 invalidate합니다. 여기서 invalidate는 “다음에 다시 읽어야 하는 오래된 캐시”라고 표시하는 동작입니다.
 
 - 재고 목록
 - 재고 요약
@@ -576,7 +572,7 @@ run이 `SUCCEEDED`이고 `changedCount > 0`이면 프론트엔드는 0~3초의 �
 - LOT
 - 위험 조회
 
-대시보드와 통계는 task의 `dashboardReady`, `inventoryStatisticsReady`가 `true`가 된 뒤 각각 갱신합니다. 스냅샷이 `FAILED`이거나 5분 안에 상태를 확인하지 못하면 `SNAPSHOT_REFRESH_FAILED`, `SNAPSHOT_REFRESH_DELAYED` 상태로 분리합니다.
+대시보드와 통계는 task의 `dashboardReady`, `inventoryStatisticsReady`가 `true`가 된 뒤 각각 갱신합니다. 스냅샷이 `FAILED`이거나 5분 안에 준비되지 않으면 `SNAPSHOT_REFRESH_FAILED`, `SNAPSHOT_REFRESH_DELAYED`로 따로 표시합니다.
 
 이 흐름 덕분에 사용자는 “동기화 자체는 성공했지만 대시보드 집계가 아직 준비되지 않음”을 구분해서 볼 수 있습니다.
 
@@ -608,11 +604,11 @@ QUEUED
 | 오래된 워커가 쓰기를 시도 | fencing token 검사 실패 | 현재 run 결과만 추적 |
 | snapshot task만 실패 | canonical 성공과 분리된 task 실패 기록 | 집계 최신화 실패 또는 지연 상태 표시 |
 
-여기서 중요한 것은 모든 실패를 “다시 처음부터 무조건 실행”으로 처리하지 않는 것입니다. 같은 요청인지, 실행이 이미 존재하는지, 데이터가 실행 중 바뀌었는지에 따라 재시도 의미가 다릅니다.
+여기서 중요한 점은 모든 실패를 “처음부터 다시 실행”으로 처리하지 않는 것입니다. 같은 요청인지, 이미 실행이 있는지, 실행 중 데이터가 바뀌었는지에 따라 재시도 방법이 달라집니다.
 
 ## 13. 왜 이 계산은 백엔드에 있고, 이 연산은 DB에 있는가
 
-이 구조는 “DB와 백엔드 중 하나만 선택”한 결과가 아닙니다. 각 계층이 잘하는 일을 나눴습니다.
+DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 일을 나눴습니다.
 
 | 작업 | 담당 | 이유 |
 | --- | --- | --- |
@@ -624,7 +620,7 @@ QUEUED
 | afterCommit 워커·스냅샷 실행 | 백엔드 | 트랜잭션 경계와 비동기 작업 수명주기를 조정해야 함 |
 | 화면 상태·폴링·캐시 갱신 | 프론트엔드 | 사용자에게 실행 단계와 오류를 보여주는 책임이 있음 |
 
-위험 규칙까지 전부 DB 프로시저로 만들면 DB 안에서 빠르게 계산할 수 있는 부분은 있지만, Java 테스트·정책 버전·응답 메시지 계약을 함께 관리하기 어려워집니다. 반대로 코드 개요 문서에서 확인한 97,014개 수준의 `INVENTORY_BALANCE` 행과 여러 관계를 Java로 모두 읽은 뒤 집계하면 네트워크와 애플리케이션 메모리 부담이 커집니다. 이 수치는 고정된 코드 상수가 아니라 당시 데이터 적재 규모입니다. 그래서 SQL은 대량 데이터 선별과 갱신, Java는 오케스트레이션과 정책 계산을 맡겼습니다.
+위험 규칙까지 전부 DB 프로시저로 만들면 DB 안에서 계산하기는 편하지만, Java 테스트·정책 버전·응답 메시지를 함께 관리하기가 어려워집니다. 반대로 약 97,014개의 `INVENTORY_BALANCE` 행과 여러 관계를 Java로 모두 읽어 집계하면 네트워크와 애플리케이션 메모리 부담이 커집니다. 이 숫자는 코드에 박힌 한도가 아니라 당시 데이터 규모입니다. 그래서 SQL은 대량 데이터 선별·갱신을 맡고, Java는 실행 순서와 정책 계산을 맡겼습니다.
 
 ## 14. 선택지와 트레이드오프
 
@@ -758,6 +754,6 @@ InventoryQuantitySqlContractTest
 
 ## 이어서 정리할 내용
 
-- 통합재고 조회 성능 최적화 — 프론트엔드 캐시·폴링·렌더링, 백엔드 집계 API, Oracle SQL·복합 인덱스·페이지네이션
-- [Lighthouse로 첫 렌더링 경로 줄이기](/blog/stockfit-lighthouse-critical-rendering-path) — 측정 조건과 실제 변경 코드 중심
-- UI 일관성 유지 — shadcn 스타일 컴포넌트, 디자인 토큰, 재사용 구조, Storybook
+- [2편: 통합재고 조회 성능 최적화](/blog/integrated-inventory-query-optimization) — 후보 집합·복합 인덱스·가용수량·예상 폐기수량·프론트 요청 흐름
+- [3편: Lighthouse로 첫 렌더링 경로 줄이기](/blog/stockfit-lighthouse-critical-rendering-path) — 측정 조건과 실제 변경 코드 중심
+- 4편: UI 일관성 유지 — shadcn 스타일 컴포넌트, 디자인 토큰, 재사용 구조, Storybook

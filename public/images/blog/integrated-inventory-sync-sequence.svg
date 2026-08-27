@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="840" viewBox="0 0 1440 840" role="img" aria-labelledby="title desc">
+  <title id="title">통합재고 동기화 실행 순서</title>
+  <desc id="desc">사용자가 버튼을 누른 뒤 프론트엔드, 동기화 제출 API, 워커, canonical 반영, 위험 판정, 스냅샷 작업을 거쳐 다시 화면을 갱신하는 순서</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .participant { font: 700 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .message { font: 500 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #1e293b; }
+      .note { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .box { fill: #eff6ff; stroke: #93c5fd; stroke-width: 2; }
+      .line { stroke: #cbd5e1; stroke-width: 2; stroke-dasharray: 8 8; }
+      .arrow { stroke: #3b82f6; stroke-width: 2.5; marker-end: url(#arrow); }
+      .arrow-muted { stroke: #64748b; stroke-width: 2.5; marker-end: url(#arrow-muted); }
+      .self { fill: none; stroke: #64748b; stroke-width: 2.5; marker-end: url(#arrow-muted); }
+    </style>
+  </defs>
+
+  <rect width="1440" height="840" rx="28" fill="#f8fafc"/>
+  <text x="48" y="58" class="title">통합재고 동기화 실행 순서</text>
+  <text x="48" y="86" class="note">버튼 클릭부터 최신 목록·상세·집계가 화면에 나타나기까지</text>
+
+  <g transform="translate(10 0)">
+    <rect x="35" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="245" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="455" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="665" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="875" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="1085" y="112" width="150" height="54" rx="12" class="box"/>
+    <rect x="1295" y="112" width="110" height="54" rx="12" class="box"/>
+
+    <text x="110" y="146" text-anchor="middle" class="participant">사용자</text>
+    <text x="320" y="146" text-anchor="middle" class="participant">프론트엔드</text>
+    <text x="530" y="136" text-anchor="middle" class="participant">동기화</text>
+    <text x="530" y="157" text-anchor="middle" class="participant">제출 API</text>
+    <text x="740" y="146" text-anchor="middle" class="participant">동기화 워커</text>
+    <text x="950" y="136" text-anchor="middle" class="participant">canonical</text>
+    <text x="950" y="157" text-anchor="middle" class="participant">반영</text>
+    <text x="1160" y="136" text-anchor="middle" class="participant">위험</text>
+    <text x="1160" y="157" text-anchor="middle" class="participant">판정</text>
+    <text x="1350" y="136" text-anchor="middle" class="participant">대시보드·통계</text>
+    <text x="1350" y="157" text-anchor="middle" class="participant">스냅샷</text>
+
+    <line x1="110" y1="178" x2="110" y2="782" class="line"/>
+    <line x1="320" y1="178" x2="320" y2="782" class="line"/>
+    <line x1="530" y1="178" x2="530" y2="782" class="line"/>
+    <line x1="740" y1="178" x2="740" y2="782" class="line"/>
+    <line x1="950" y1="178" x2="950" y2="782" class="line"/>
+    <line x1="1160" y1="178" x2="1160" y2="782" class="line"/>
+    <line x1="1350" y1="178" x2="1350" y2="782" class="line"/>
+
+    <line x1="110" y1="220" x2="320" y2="220" class="arrow"/>
+    <text x="215" y="209" text-anchor="middle" class="message">동기화 버튼 클릭</text>
+
+    <line x1="320" y1="280" x2="530" y2="280" class="arrow"/>
+    <text x="425" y="269" text-anchor="middle" class="message">clientRequestId와 POST</text>
+
+    <path d="M 530 325 C 600 325, 600 370, 530 370" class="self"/>
+    <text x="612" y="334" text-anchor="middle" class="message">guard 행 잠금·중복 확인</text>
+    <text x="612" y="355" text-anchor="middle" class="note">활성 실행 여부도 확인</text>
+
+    <line x1="530" y1="420" x2="320" y2="420" class="arrow-muted"/>
+    <text x="425" y="409" text-anchor="middle" class="message">202 Accepted · QUEUED</text>
+
+    <line x1="530" y1="475" x2="740" y2="475" class="arrow"/>
+    <text x="635" y="464" text-anchor="middle" class="message">커밋 후 워커 실행</text>
+
+    <path d="M 740 520 C 810 520, 810 565, 740 565" class="self"/>
+    <text x="820" y="529" text-anchor="middle" class="message">원천 4종을 500건씩 읽고</text>
+    <text x="820" y="550" text-anchor="middle" class="message">공통 형태로 정규화</text>
+
+    <line x1="740" y1="615" x2="950" y2="615" class="arrow"/>
+    <text x="845" y="604" text-anchor="middle" class="message">changed-only MERGE</text>
+
+    <line x1="950" y1="670" x2="1160" y2="670" class="arrow"/>
+    <text x="1055" y="659" text-anchor="middle" class="message">LOT·재고·예측·정책으로</text>
+    <text x="1055" y="680" text-anchor="middle" class="message">위험 판정</text>
+
+    <line x1="950" y1="730" x2="1350" y2="730" class="arrow"/>
+    <text x="1150" y="719" text-anchor="middle" class="message">커밋 후 스냅샷 task 실행</text>
+
+    <path d="M 320 770 C 240 770, 240 805, 320 805" class="arrow-muted"/>
+    <text x="480" y="797" text-anchor="middle" class="message">실행·스냅샷 상태 폴링 후</text>
+    <text x="760" y="797" text-anchor="middle" class="message">준비된 데이터만 캐시 갱신</text>
+  </g>
+</svg>

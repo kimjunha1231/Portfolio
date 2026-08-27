@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="560" viewBox="0 0 1320 560" role="img" aria-labelledby="title desc">
+  <title id="title">30일 예상 폐기수량 계산 흐름</title>
+  <desc id="desc">판매 가능한 LOT에서 판매 종료일을 계산하고 30일 후보를 만든 뒤, 판매처 범위별 forecast 유효성에 따라 예상 폐기를 계산해 SKU로 합산하는 과정</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <style>
+      .title { font: 700 26px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .label { font: 700 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .note { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .box { fill: #eff6ff; stroke: #93c5fd; stroke-width: 2; }
+      .box2 { fill: #ecfdf5; stroke: #6ee7b7; stroke-width: 2; }
+      .box3 { fill: #fff7ed; stroke: #fdba74; stroke-width: 2; }
+      .decision { fill: #fef3c7; stroke: #f59e0b; stroke-width: 2; }
+      .arrow { stroke: #2563eb; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .branch { stroke: #64748b; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1320" height="560" rx="28" fill="#ffffff"/>
+  <text x="50" y="55" class="title">판매 종료일까지 남을 수량을 판매처별로 계산합니다</text>
+
+  <rect x="50" y="120" width="210" height="90" rx="18" class="box2"/>
+  <text x="155" y="158" text-anchor="middle" class="label">현재 판매 가능한 LOT</text>
+  <text x="155" y="185" text-anchor="middle" class="note">AVAILABLE만 대상</text>
+
+  <rect x="330" y="120" width="220" height="90" rx="18" class="box"/>
+  <text x="440" y="158" text-anchor="middle" class="label">판매 종료일 계산</text>
+  <text x="440" y="185" text-anchor="middle" class="note">소비기한·판매중지일 중 빠른 날짜</text>
+
+  <rect x="620" y="120" width="210" height="90" rx="18" class="box3"/>
+  <text x="725" y="158" text-anchor="middle" class="label">D+1~D+30 후보</text>
+  <text x="725" y="185" text-anchor="middle" class="note">30일 안에 끝나는 LOT</text>
+
+  <rect x="900" y="120" width="250" height="90" rx="18" class="box"/>
+  <text x="1025" y="158" text-anchor="middle" class="label">판매처 범위로 묶기</text>
+  <text x="1025" y="185" text-anchor="middle" class="note">SKU × resolved sales_point_id</text>
+
+  <path d="M260 165 H330" class="arrow"/>
+  <path d="M550 165 H620" class="arrow"/>
+  <path d="M830 165 H900" class="arrow"/>
+
+  <rect x="470" y="330" width="240" height="90" rx="18" class="decision"/>
+  <text x="590" y="367" text-anchor="middle" class="label">유효한 최신 forecast?</text>
+  <text x="590" y="394" text-anchor="middle" class="note">활성 모델·누적값 검증</text>
+
+  <rect x="120" y="330" width="250" height="90" rx="18" class="box2"/>
+  <text x="245" y="367" text-anchor="middle" class="label">forecast 있음</text>
+  <text x="245" y="394" text-anchor="middle" class="note">D+7·D+14·D+30 비교</text>
+
+  <rect x="820" y="330" width="250" height="90" rx="18" class="box3"/>
+  <text x="945" y="367" text-anchor="middle" class="label">forecast 없음·미할당</text>
+  <text x="945" y="394" text-anchor="middle" class="note">D+30 종료수량 전체 fallback</text>
+
+  <rect x="470" y="470" width="240" height="58" rx="16" class="box"/>
+  <text x="590" y="505" text-anchor="middle" class="label">SKU 예상 폐기로 합산</text>
+
+  <path d="M1025 210 V275 H590 V330" class="arrow"/>
+  <path d="M470 375 H370" class="branch"/>
+  <path d="M710 375 H820" class="branch"/>
+  <path d="M245 420 V470 H590" class="arrow"/>
+  <path d="M945 420 V470 H590" class="arrow"/>
+  <text x="390" y="360" class="note">예</text>
+  <text x="735" y="360" class="note">아니오</text>
+</svg>
