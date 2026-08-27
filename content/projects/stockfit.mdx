@@ -1,0 +1,271 @@
+---
+title: "StockFit 현대그린푸드 재고관리 플랫폼"
+category: "React / Spring Boot (팀 프로젝트)"
+projectCategory: "재고 관리"
+platforms: ["web"]
+role: "fullstack"
+tags: ["React", "Spring Boot", "Oracle", "MyBatis", "TanStack Query", "Storybook"]
+cover: "/images/projects/stockfit/inventory-lighthouse-after.png"
+coverAlt: "StockFit 통합 재고 조회 페이지의 production preview Lighthouse 결과"
+githubUrl: "https://github.com/kosa11-final-project/FrontEnd"
+date: "2026-08-06"
+lastModified: "2026-08-27"
+description: "여러 판매 채널과 물류센터의 재고를 SKU 단위로 통합하고, 위험 재고·수요예측·동기화 상태를 한 화면에서 관리하도록 만든 B2B 재고 운영 플랫폼입니다."
+---
+
+## 프로젝트 개요
+
+StockFit은 현대그린푸드의 여러 판매 채널과 물류센터에 흩어진 재고를 SKU 단위로 통합해 보여주는 B2B 재고 운영 플랫폼입니다. 운영자는 재고 수량만 확인하는 것이 아니라 판매처별 보유 현황, LOT와 소비기한, 안전재고 미달 여부, 수요예측과 위험 사유를 함께 살펴보고 필요한 대응을 판단합니다.
+
+- **구분**: 팀 프로젝트 (풀스택 4인)
+- **기간**: 2026.08
+- **담당 범위**: 프론트엔드 공통 기반, 통합 재고 조회·상세·필터, 수요예측·위험 상태, 원천 재고 동기화, 조회·초기 렌더링 성능 개선
+- **기술 스택**:
+  - 프론트엔드: React 19, Vite, TanStack Query, TanStack Table, Tailwind CSS
+  - 백엔드: Java 17, Spring Boot, MyBatis, Spring Batch
+  - 데이터·인프라: Oracle, Flyway, RabbitMQ, Redis, Azure Blob Storage
+  - 품질 관리: Storybook, Vitest, Playwright, GitHub Actions, Chromatic
+- **저장소**: [FrontEnd](https://github.com/kosa11-final-project/FrontEnd) · [BackEnd](https://github.com/kosa11-final-project/BackEnd) · [dummy-data](https://github.com/kosa11-final-project/dummy-data)
+- **측정·검증 결과**:
+  - 4개 채널 AND 조회로 정리된 Network 캡처에서 목록 **17.99초·요약 30초 취소**, 이후 캡처에서 목록 **726ms·요약 459ms** 관찰
+  - 정렬 조건이 포함된 목록 캡처에서 **18.19초**, 이후 캡처에서 **821ms** 관찰
+  - 통합 재고 Lighthouse: 개발 서버 캡처 **Performance 35점·LCP 19.4초·CLS 0.449**, production preview 캡처 **99점·0.8초·0.013**
+  - 대시보드 Lighthouse: 개발 서버 캡처 **Performance 47점·LCP 8.3초**, production preview 캡처 **99점·0.9초**
+  - 기준 데이터 스냅샷의 수동 동기화 run #163에서 **33,358건 조회·33,358건 반영·오류 0건** 확인
+
+<blockquote>측정 기준: Lighthouse 이전 캡처는 Vite 개발 서버(localhost:5173), 이후 캡처는 production preview(localhost:4173)에서 기록했습니다. 따라서 점수 차이에는 코드 변경뿐 아니라 실행 모드 차이도 포함됩니다. Network 캡처도 실행 환경·캐시·데이터 버전을 통제한 반복 벤치마크가 아니라 각 시점의 단일 관찰값입니다. 본문에서는 제공된 캡처 수치를 그대로 기록하되, 동일 조건의 A/B 테스트 결과로 해석하지 않았습니다.</blockquote>
+
+## 담당 기능
+
+- **프론트엔드 개발 기반**: 네 명의 풀스택 개발자가 같은 방식으로 기능을 추가할 수 있도록 FSD-lite 구조, 디자인 토큰, 공통 HTTP 계층, Storybook, 테스트와 CI 기준을 구성했습니다.
+- **통합 재고 조회**: 상품명·SKU·판매처 검색, 채널·물류센터·지역·카테고리·보관유형·위험도 필터, AND/OR 조건, 정렬, 페이지네이션을 구현했습니다. 필터와 상세 상태는 URL에 저장해 새로고침과 링크 공유 후에도 유지되도록 했습니다.
+- **재고 상세와 수요예측**: SKU별 판매처·미할당 재고, 보관 위치, LOT, 소비기한, 판매중지일, 가격을 조회하고 D+7·D+14·D+30·D+60·D+90 수요예측과 안전재고 하회 시점을 함께 보여주도록 구성했습니다.
+- **위험 재고 판단**: 안전재고 미달, 예상 재고 소진, 소비기한과 판매중지 상태를 바탕으로 위험 등급과 사유를 표시하고, 화면과 동기화 결과에서 같은 기준을 사용하도록 정합성을 보완했습니다.
+- **원천 재고 동기화**: 서로 다른 네 종류의 원천 재고를 공통 재고 모델로 반영하고, 실행 등록·진행·완료·실패·복구 대기 상태를 화면에서 확인하도록 연결했습니다.
+- **성능과 접근성**: SQL 조회 순서와 인덱스를 조정하고, 라우트·상세 기능·차트·3D·이미지를 필요한 시점에 불러오도록 분리했습니다. 스켈레톤 크기와 표 레이아웃을 고정하고 키보드 탐색, 제목 계층, 색상 대비와 ARIA 관계를 보완했습니다.
+
+## 주요 기술 개선
+
+### 1. 통합 재고 다중 필터 조회 성능 개선
+
+#### <span className="text-accent-blue font-bold">문제 상황</span>
+
+통합 재고는 한 SKU가 여러 판매 채널과 물류센터에 걸쳐 존재합니다. 여러 채널을 AND 조건으로 선택하면 선택한 채널을 모두 보유한 SKU만 보여줘야 했고, 같은 조건으로 목록·요약·정렬 결과도 일치해야 했습니다.
+
+초기 쿼리는 후보 SKU를 충분히 줄이기 전에 상세 집계와 정렬을 수행했습니다. 네 개 채널을 AND로 조회한 것으로 정리된 캡처에서 목록 요청은 **17.99초**가 걸렸고, 요약 요청은 **30초 안에 끝나지 않아 취소**됐습니다. 정렬 조건이 포함된 별도 목록 캡처에서도 **18.19초**가 관찰돼 필터나 정렬을 바꿀 때 사용자가 결과를 기다려야 했습니다.
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose">
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-filter-before.png"
+        alt="이전 네 개 판매 채널 AND 조회 자료에서 목록 요청이 17.99초 걸리고 요약 요청이 30초에 취소된 Network 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이전 캡처 · 4개 채널 AND 조회 자료</figcaption>
+  </figure>
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-filter-after.png"
+        alt="이후 네 개 판매 채널 AND 조회 자료에서 목록 요청 726ms와 요약 요청 459ms가 기록된 Network 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이후 캡처 · 목록 726ms, 요약 459ms</figcaption>
+  </figure>
+</div>
+
+#### <span className="text-accent-blue font-bold">해결 과정</span>
+
+먼저 목록의 기준을 행이 아니라 **SKU와 판매처의 후보 키**로 고정했습니다. AND 조건에서는 `COUNT(DISTINCT 선택값) = 선택한 필터 수`로 모든 선택값을 만족하는지 확인하고, OR 조건은 `EXISTS ... IN (...)`으로 하나 이상 일치하는 SKU를 찾도록 분리했습니다. 이 기준을 목록과 요약 쿼리에 함께 적용해 필터 결과가 서로 달라지지 않게 했습니다.
+
+그다음에는 조회 순서를 바꿨습니다. 필터를 만족하는 후보 키를 먼저 좁힌 뒤, 정렬에 필요한 SKU 단위 수량과 위험도를 계산해 페이지를 확정했습니다. 판매처, LOT, 정책과 가격 같은 상세 집계는 그다음 현재 페이지의 SKU에만 수행했습니다. 전체 후보의 상세 정보를 먼저 펼치는 대신, 후보 명단에서 정렬과 페이지를 확정한 뒤 현재 페이지를 자세히 계산하는 방식입니다.
+
+```text
+필터 적용 → 후보 SKU·판매처 키 → SKU 단위 수량·위험도와 정렬 → 페이지 확정 → 현재 페이지 상세 집계
+```
+
+마지막으로 `inventory_balance`의 SKU·판매처 범위와 위험도·정책·가격의 최신 이력 조회에 맞는 복합 인덱스를 추가했습니다. SQL 렌더링 계약 테스트에서는 단일·복수 선택과 AND/OR SQL 형태를, Oracle 통합 테스트에서는 페이지 결과와 미할당 재고 합산을 확인했습니다.
+
+대표 작업은 BackEnd [#120](https://github.com/kosa11-final-project/BackEnd/pull/120)과 [#129](https://github.com/kosa11-final-project/BackEnd/pull/129), FrontEnd [#52](https://github.com/kosa11-final-project/FrontEnd/pull/52)와 [#65](https://github.com/kosa11-final-project/FrontEnd/pull/65)에 반영했습니다.
+
+#### <span className="text-accent-blue font-bold">결과</span>
+
+제공된 4개 채널 AND 자료에서 이전 캡처의 목록 요청은 **17.99초**, 요약 요청은 **30초에 취소**된 것으로 기록됐습니다. 이후 캡처에서는 목록 **726ms**, 요약 **459ms**가 관찰됐습니다. 정렬 조건이 포함된 별도 자료도 이전 캡처 **18.19초**, 이후 캡처 **821ms**를 기록했습니다. 다만 실행 환경·캐시·데이터 버전을 고정한 반복 측정은 아니므로 감소율은 성과 수치로 사용하지 않았습니다.
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose">
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-sort-before.png"
+        alt="이전 정렬 조건의 통합 재고 목록 요청이 18.19초 걸린 Network 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이전 캡처 · 정렬 조건 포함 목록 18.19초</figcaption>
+  </figure>
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-sort-after.png"
+        alt="이후 정렬 조건의 통합 재고 목록 요청이 821ms로 기록된 Network 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이후 캡처 · 정렬 조건 포함 목록 821ms</figcaption>
+  </figure>
+</div>
+
+세부 쿼리 설계와 필터 의미는 [통합 재고 조회 쿼리 최적화](/blog/integrated-inventory-query-optimization)에 별도로 정리했습니다.
+
+### 2. 첫 화면을 늦추는 코드와 이미지 로딩 분리
+
+#### <span className="text-accent-blue font-bold">문제 상황</span>
+
+개발 서버에서 통합 재고 화면을 측정했을 때 Lighthouse Performance는 **35점**, 첫 콘텐츠가 그려지는 시점(FCP)은 **9.7초**, 가장 큰 콘텐츠가 그려지는 시점(LCP)은 **19.4초**였습니다. 데이터가 도착하면서 표와 안내 문구의 높이가 바뀌어 레이아웃 이동량(CLS)도 **0.449**까지 올라갔습니다. 대시보드도 3D 관제 화면을 포함한 무거운 기능을 첫 진입부터 불러오면서 Performance **47점**, LCP **8.3초**를 기록했습니다.
+
+현재 경로에서 쓰지 않는 페이지 코드, 상세 Drawer와 차트, 3D 모듈, 이미지 확대 기능이 모두 초기 번들에 포함되어 있어 원인이 한 가지는 아니었습니다. 통합 재고 목록의 큰 원본 이미지도 화면 밖에 있는 행까지 한꺼번에 요청했고, 실제 표와 스켈레톤의 크기가 달라 데이터 로드 후 레이아웃이 움직였습니다.
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose">
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-lighthouse-before.png"
+        alt="통합 재고 조회 개발 서버 Lighthouse Performance 35점과 LCP 19.4초 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>통합 재고 개발 서버 캡처 · Performance 35점</figcaption>
+  </figure>
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-lighthouse-after.png"
+        alt="통합 재고 조회 production preview Lighthouse Performance 99점과 LCP 0.8초 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>통합 재고 production preview 캡처 · Performance 99점</figcaption>
+  </figure>
+</div>
+
+#### <span className="text-accent-blue font-bold">해결 과정</span>
+
+페이지 단위로 `React.lazy`를 적용해 현재 경로의 코드만 먼저 받도록 했습니다. 통합 재고 안에서도 상세 Drawer, 수요예측 차트, 전략 생성 Modal, 이미지 Lightbox는 사용자가 열었을 때 불러오도록 분리했습니다. 대시보드의 Three.js 3D 관제는 WebGL 지원, 화면 크기와 데이터 조건을 확인한 뒤 유휴 시간에 시작하도록 바꿨습니다.
+
+처음 보이는 두 행의 이미지만 우선 요청하고, 나머지는 `IntersectionObserver`로 화면 가까이에 들어왔을 때 로드했습니다. 네이버 상품 이미지에는 제공처의 `f100` 썸네일 규격을 먼저 적용하고, 실패하면 원본으로 되돌아가도록 했습니다. 사용하지 않는 Sentry 초기화 코드는 제거했고, Vite 설정에서는 아이콘과 TanStack 계열 의존성을 별도 청크로 나눴습니다.
+
+레이아웃 이동을 줄이려고 실제 표와 같은 열 너비와 행 높이를 스켈레톤에 적용하고 `table-layout: fixed`로 고정했습니다. 성능 작업과 함께 행의 잘못된 버튼 역할을 제거하고 탭의 ARIA 관계와 제목 순서, 색상 대비도 보완했습니다. 공통 UI 정비는 FrontEnd [#74](https://github.com/kosa11-final-project/FrontEnd/pull/74)에 반영됐고, 라우트·이미지·3D 지연 로딩과 Lighthouse 대응은 **미병합 상태인** FrontEnd [#91](https://github.com/kosa11-final-project/FrontEnd/pull/91)에서 구현·검증 중입니다.
+
+#### <span className="text-accent-blue font-bold">결과</span>
+
+제공된 통합 재고 Lighthouse 자료에서 개발 서버 캡처는 Performance **35점**, FCP **9.7초**, LCP **19.4초**, CLS **0.449**, Accessibility **93점**, SEO **83점**을 기록했습니다. production preview 캡처에서는 각각 **99점**, **0.6초**, **0.8초**, **0.013**, **100점**, **100점**이 관찰됐습니다.
+
+대시보드 개발 서버 캡처는 Performance **47점**, FCP **3.0초**, LCP **8.3초**, 메인 스레드 차단 시간(TBT) **240ms**, Accessibility **95점**, SEO **83점**을 기록했습니다. production preview 캡처에서는 각각 **99점**, **0.6초**, **0.9초**, **40ms**, **100점**, **100점**이 관찰됐습니다.
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose">
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/dashboard-lighthouse-before.png"
+        alt="대시보드 개발 서버 Lighthouse Performance 47점과 LCP 8.3초 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>대시보드 개발 서버 캡처 · Performance 47점</figcaption>
+  </figure>
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/dashboard-lighthouse-after.png"
+        alt="대시보드 production preview Lighthouse Performance 99점과 LCP 0.9초 결과"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>대시보드 production preview 캡처 · Performance 99점</figcaption>
+  </figure>
+</div>
+
+제공된 초기 Network 자료에서 이전 캡처는 전체 **103건·31.4MB**, 이후 첫 화면 캡처는 **15건·4.2MB**를 기록했습니다. 이 수치는 이미지 파일만이 아니라 각 캡처에 포함된 전체 네트워크 요청이며, 두 캡처의 전체 URL·캐시 조건이 동일하다는 근거는 남아 있지 않습니다. 지연 로딩 방식이므로 사용자가 아래로 스크롤하면 필요한 이미지 요청은 이어집니다.
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose">
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-images-before.png"
+        alt="이전 첫 화면에서 전체 103건과 31.4MB가 기록된 Network 패널"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이전 Network 캡처 · 전체 103건, 31.4MB</figcaption>
+  </figure>
+  <figure>
+    <div className="overflow-hidden rounded-2xl border border-card-border bg-black/5">
+      <ZoomableImage
+        src="/images/projects/stockfit/inventory-images-after.png"
+        alt="이후 첫 화면에서 전체 15건과 4.2MB가 기록된 Network 패널"
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
+    <figcaption>이후 첫 화면 Network 캡처 · 전체 15건, 4.2MB</figcaption>
+  </figure>
+</div>
+
+### 3. 네 종류의 원천 재고를 한 번만 안전하게 반영하는 동기화 흐름
+
+#### <span className="text-accent-blue font-bold">문제 상황</span>
+
+창고·온라인·오프라인·기타 원천 재고는 식별자와 수량 표현이 서로 달랐습니다. 원천 형식을 그대로 통합 재고 화면에 연결하면 같은 상품이 중복되거나, 재실행할 때 이미 반영한 재고를 다시 더할 수 있었습니다. 여러 운영자가 동시에 동기화를 누르는 상황과 동기화 후 대시보드·통계 스냅샷 중 하나만 실패하는 상황도 처리해야 했습니다.
+
+#### <span className="text-accent-blue font-bold">해결 과정</span>
+
+원천별 파서를 공통 형식으로 바꾼 뒤 SKU, 판매처, 물류센터, LOT 식별자를 해석해 통합 기준 재고에 반영하고, 원천 행의 해시를 이전 반영 해시와 비교해 실제로 바뀐 행만 대상으로 삼았습니다. 같은 `clientRequestId`로 다시 호출되면 기존 실행을 반환하므로, 재시도해도 같은 실행이 중복 등록되지 않습니다.
+
+두 실행이 동시에 재고를 바꾸지 못하도록 Oracle의 행 잠금과 실행 상태를 함께 확인했습니다. 재고 반영과 위험도 재산정은 핵심 동기화 안에서 처리하고, 대시보드와 통계용 집계 데이터 생성은 별도 작업으로 분리해 실패한 작업만 재시도하거나 복구하도록 했습니다.
+
+활성 실행이 있을 때만 프론트엔드가 5초 간격으로 상태를 확인하며, 백그라운드 탭에서는 반복 조회를 멈춥니다. 동기화가 성공하면 재고 목록과 요약, 상세, LOT, 위험도에 사용하던 TanStack Query 캐시를 갱신해 새 결과를 화면에 반영했습니다.
+
+```text
+원천 4종 → 형식 정규화 → 변경 행 판별 → 통합 재고 반영 → 위험도 재산정
+                                                     └→ 대시보드·통계 스냅샷 작업
+```
+
+백엔드 핵심 구현은 [#65](https://github.com/kosa11-final-project/BackEnd/pull/65), [#83](https://github.com/kosa11-final-project/BackEnd/pull/83), [#93](https://github.com/kosa11-final-project/BackEnd/pull/93), [#97](https://github.com/kosa11-final-project/BackEnd/pull/97)에, 프론트 상태 연결은 [#32](https://github.com/kosa11-final-project/FrontEnd/pull/32)와 [#40](https://github.com/kosa11-final-project/FrontEnd/pull/40)에 반영했습니다. 재현 가능한 원천 데이터는 dummy-data [#4](https://github.com/kosa11-final-project/dummy-data/pull/4)에서 생성했습니다.
+
+#### <span className="text-accent-blue font-bold">결과</span>
+
+동기화 실행 이력, 원천별 처리 건수, 오류 건수와 후속 스냅샷 상태를 화면에서 나눠 보여줬습니다. 기준 데이터 스냅샷을 사용한 수동 검증 run #163에서는 원천 **33,358건을 읽어 33,358건을 반영했고 오류는 0건**이었습니다. 같은 요청의 중복 실행을 막으면서도 실패한 후속 스냅샷 task만 다시 처리하므로, 전체 재고 동기화를 처음부터 반복할 필요가 없습니다.
+
+정규화 기준과 복구 흐름은 [원천 데이터 정규화](/blog/integrated-inventory-source-normalization)와 [통합 재고 동기화 아키텍처](/blog/integrated-inventory-sync-end-to-end-architecture)에 자세히 정리했습니다.
+
+### 4. 네 명이 같은 기준으로 기능을 추가할 수 있는 프론트엔드 기반
+
+#### <span className="text-accent-blue font-bold">문제 상황</span>
+
+프로젝트 초기에 네 명의 풀스택 개발자가 동시에 화면을 만들기 시작하면 폴더 위치, API 호출 방식, 공통 UI와 상태 관리 기준이 빠르게 달라질 수 있었습니다. 기능 구현 속도만 우선하면 페이지가 늘어날수록 수정 범위를 예측하기 어렵고, 새 팀원이 기존 화면의 로딩·오류·빈 상태를 놓칠 가능성도 있었습니다.
+
+#### <span className="text-accent-blue font-bold">해결 과정</span>
+
+엄격한 FSD 전체 규칙 대신 팀 규모에 맞춘 FSD-lite를 적용했습니다. `app → pages → widgets → features → entities → shared`의 의존 방향을 정하고, 한 화면에서만 쓰는 코드는 먼저 페이지에 두되 두 곳 이상에서 같은 의미로 사용할 때만 상위 구조로 분리했습니다.
+
+Axios는 HTTP 요청과 공통 오류 처리, TanStack Query는 서버 상태와 캐시를 담당하도록 역할을 나눴습니다. 디자인 토큰과 공통 컴포넌트 상태는 Storybook에서 확인하도록 구성하고, PR에서 ESLint·Prettier·Vitest·production build·Storybook·Playwright를 실행하는 CI workflow와 온보딩 문서를 만들었습니다.
+
+이 기반 작업은 FrontEnd [#1](https://github.com/kosa11-final-project/FrontEnd/pull/1), [#2](https://github.com/kosa11-final-project/FrontEnd/pull/2), [#5](https://github.com/kosa11-final-project/FrontEnd/pull/5)에 반영했고, 이후 통합 재고·수요예측·위험 상태의 상태별 Storybook은 [#47](https://github.com/kosa11-final-project/FrontEnd/pull/47)과 [#51](https://github.com/kosa11-final-project/FrontEnd/pull/51)에서 확장했습니다.
+
+#### <span className="text-accent-blue font-bold">결과</span>
+
+페이지에서 Axios를 직접 호출하거나 API 응답을 별도 전역 상태에 복사하지 않는 공통 흐름을 만들었습니다. 통합 재고 기능도 API·모델·필터·동기화·테이블·상세 화면별로 책임을 나눠 개발했습니다. 미병합 성능 개선 브랜치에서는 `pnpm run check` 범위인 **Vitest 80개 파일·420개 테스트, ESLint, Prettier, production build**를 통과했지만, Playwright E2E 실패가 남아 있어 전체 PR CI는 아직 통과하지 못했습니다.
+
+이 수치는 프로젝트 전체 단위 테스트 건수이며 개인 작성 테스트 수를 뜻하지 않습니다. 포트폴리오에는 제 작업을 과장하지 않도록 팀 저장소의 전체 테스트 결과와 제가 담당한 구조·기능 범위를 구분해 기록했습니다.
