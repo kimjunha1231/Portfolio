@@ -248,7 +248,256 @@ FETCH NEXT #{limit} ROWS ONLY
 
 이 방식은 페이지를 읽는 중 앞쪽 데이터가 바뀌어도, “마지막으로 읽은 키 다음부터” 이어갈 수 있다는 장점이 있습니다. 대신 `source_record_key`가 안정적으로 정렬되어야 하고, 실행 중에는 원천 버전을 고정해야 합니다. 워커는 읽기 시작 뒤 `current_version`이 바뀌었는지도 마지막에 확인하고, 달라졌다면 `SOURCE_CHANGED`로 중단합니다.
 
-## 5. canonical에 넣기 전: 매핑과 입력을 먼저 닫습니다
+## 5. 원천 테이블을 합치기 위해 만든 7개 관리 테이블
+
+앞 절에서는 네 원천 테이블에서 어떤 값을 읽는지 간단히 봤습니다. 원천 테이블의 컬럼을 모두 외울 필요는 없습니다. 중요한 것은 “읽은 행을 어디에 연결하고, 한 번의 동기화를 어떻게 추적하는가”입니다.
+
+Flyway 기준으로 `V21__create_inventory_source_sync_schema.sql`은 테이블 10개를 만듭니다. 이 중 4개는 오프라인·이커머스·그리팅·물류센터의 원천 current 테이블이고, 나머지 6개는 동기화 실행과 매핑을 관리하는 테이블입니다. 이후 `V27__create_inventory_sync_snapshot_task.sql`이 대시보드·통계 후속 작업 테이블 1개를 추가합니다. 따라서 원천 테이블을 제외하면 다음 7개입니다.
+
+`V22`의 `risk_assessment.inventory_sync_run_id` 추가와 `V24`의 `MANUAL`·`SCHEDULED` 허용은 기존 테이블을 확장한 변경입니다. 새 테이블 11개에 포함해 세지 않았습니다.
+
+<figure className="not-prose my-6">
+  <ZoomableImage
+    src="/images/blog/inventory-sync-control-schema.svg"
+    alt="inventory_sync_run을 중심으로 mutex, 원천 상태, 원천별 실행 상태, 원천과 canonical을 잇는 row map, 오류, 스냅샷 task가 연결된 통합재고 동기화 관리 테이블 구조"
+    loading="lazy"
+    decoding="async"
+    className="h-auto w-full rounded-2xl border border-card-border bg-foreground/5"
+  />
+  <figcaption>원천 4개를 직접 하나의 테이블로 합치는 대신, 실행 기록과 매핑·상태·오류·후속 작업을 7개 관리 테이블로 나눠 기록합니다.</figcaption>
+</figure>
+
+### 5.1 `inventory_sync_mutex`: 제출 버튼을 서버에서 한 줄로 세우는 테이블
+
+동기화 요청이 동시에 들어오지 않도록 잠글 대상이 필요합니다. 이 테이블에는 실제로 한 행만 넣습니다. `InventorySyncRunMapper.lockSubmissionGuard()`가 이 행을 `FOR UPDATE WAIT 5`로 잠그고, 5초 안에 잠금을 얻지 못하면 동기화 충돌로 처리합니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `mutex_id` | `NUMBER(1) NOT NULL` | 잠금 대상 ID입니다. `CHECK (mutex_id = 1)`로 값 `1`만 허용해 테이블에 여러 잠금 행이 생기지 않게 합니다. PK이기도 합니다. |
+| `created_at` | `TIMESTAMP` | 이 단일 행이 언제 만들어졌는지 남기는 감사 컬럼입니다. 잠금 상태를 저장하는 값은 아니며, 행 자체의 생성 시각입니다. |
+
+이 테이블은 실행 이력이나 원천 데이터를 저장하지 않습니다. 애플리케이션에서 버튼을 `disabled`로 만드는 것과 달리, 여러 탭·여러 서버에서 들어온 요청도 같은 DB 행을 기준으로 직렬화합니다.
+
+### 5.2 `inventory_sync_run`: 동기화 한 번의 신분증이자 상태판
+
+`inventory_sync_run`은 동기화 한 번을 대표하는 부모 행입니다. 프론트엔드가 받은 `syncRunId`, 서버의 실행 상태, 재시작에 필요한 정보, 처리 건수와 오류가 모두 여기에 모입니다.
+
+#### 실행 식별과 멱등성
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `inventory_sync_run_id` | `NUMBER IDENTITY` | 동기화 실행의 PK입니다. DB identity가 실행 ID를 만들므로 애플리케이션이 직접 번호를 정하지 않습니다. |
+| `client_request_id` | `VARCHAR2(80) NOT NULL` | 프론트엔드가 만든 요청 키입니다. 유니크 제약으로 같은 키의 요청을 한 번만 실행으로 연결합니다. 응답을 놓쳐 같은 요청을 다시 보내도 기존 run을 찾을 수 있습니다. |
+| `request_hash` | `CHAR(64) NOT NULL` | 현재 요청 DTO의 `clientRequestId`를 SHA-256으로 해시한 값입니다. 요청 원문을 그대로 비교하지 않고 고정 길이 지문으로 보관합니다. 현재 DTO에는 이 ID만 있으므로 옵션 전체의 해시는 아닙니다. |
+| `trigger_type` | `VARCHAR2(20) DEFAULT 'MANUAL'` | 실행을 시작한 경로입니다. V21에서는 `MANUAL`만 허용했고, V24에서 예약 실행인 `SCHEDULED`를 추가했습니다. |
+
+#### 실행 상태와 중복 실행 방지
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `run_status` | `VARCHAR2(30) NOT NULL` | `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`, `SOURCE_CHANGED`, `INTERRUPTED`, `LAUNCH_FAILED` 중 현재 실행 상태를 기록합니다. 프론트 폴링과 recovery가 이 값을 기준으로 다음 행동을 정합니다. |
+| `current_phase` | `VARCHAR2(30)` | `READING`, `NORMALIZING`, `VALIDATING`, `PUBLISHING`, `ASSESSING_RISK` 중 지금 실행 중인 단계를 기록합니다. 전체 성공·실패만으로는 어디에서 멈췄는지 알기 어렵기 때문에 둔 컬럼입니다. |
+| `active_scope_key` | `VARCHAR2(50)` | 현재 어떤 업무 범위가 실행 중인지 나타냅니다. 현재 값은 `INVENTORY_CANONICAL` 또는 `NULL`입니다. 유니크 제약을 걸고 실행이 끝나면 `NULL`로 바꿔, 한 번에 하나의 canonical 동기화만 진행되게 합니다. |
+
+`active_scope_key`가 `NULL`인 완료 행은 Oracle의 유니크 제약에서 여러 개가 존재할 수 있습니다. 반대로 실행 중인 행은 같은 값 `INVENTORY_CANONICAL`을 가질 수 없으므로, 애플리케이션 확인을 통과한 요청도 DB에서 마지막으로 한 번 더 막습니다.
+
+#### 동시성·복구·워커 소유권
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `fencing_token` | `NUMBER(19) DEFAULT 1` | 실행 세대 번호입니다. recovery로 새 시도가 시작되면 값이 증가하고, 이전 워커가 늦게 쓰려 할 때 현재 세대와 다르면 거절합니다. |
+| `main_batch_job_execution_id` | `NUMBER(19)` | Spring Batch의 실제 job execution ID를 저장합니다. recovery 시 이미 실행 중인 Batch가 있는지 확인할 때 사용하며, 이 테이블의 FK로 직접 연결하지는 않습니다. |
+| `main_attempt_no` | `NUMBER(10) DEFAULT 0` | 같은 run을 몇 번째 시도로 실행하는지 기록합니다. fencing token과 함께 오래된 시도의 상태 변경을 막습니다. |
+| `lease_owner_instance_id` | `VARCHAR2(200)` | 현재 lease를 가진 워커 인스턴스 식별자입니다. heartbeat와 함께 “누가 실행권을 가지고 있는가”를 확인합니다. |
+
+`fencing_token`과 `main_attempt_no`는 단순한 로그 숫자가 아닙니다. `markRunning`, `heartbeat`, `complete`, `assertWritable`가 run ID·attempt·token을 함께 비교하기 때문에, 예전 워커가 새 시도의 상태를 덮어쓰지 못합니다.
+
+#### 요청자와 시간
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `requested_by` | `NUMBER NOT NULL` | 요청한 `app_user.user_id`입니다. FK를 두어 존재하는 사용자만 실행을 만들게 하고, 사용자별 rate limit 계산에도 사용합니다. 예약 실행은 V24에서 활성화한 `__system__` 사용자를 사용합니다. |
+| `requested_at` | `TIMESTAMP` | 요청을 접수한 시각입니다. 최근 요청 수와 마지막 요청 시각을 계산해 너무 잦은 호출을 제한합니다. |
+| `started_at` | `TIMESTAMP` | 워커가 실제 실행을 시작한 시각입니다. 위험 판정의 `assessmentInstant` 기준으로도 전달됩니다. |
+| `heartbeat_at` | `TIMESTAMP` | 실행 중인 워커가 마지막으로 살아 있음을 알린 시각입니다. 이 시간이 오래되면 stale worker로 판단할 수 있습니다. |
+| `lease_expires_at` | `TIMESTAMP` | 현재 워커의 실행권이 만료되는 시각입니다. 만료 뒤 recovery 대상이 됩니다. |
+| `completed_at` | `TIMESTAMP` | `SUCCEEDED`, `FAILED` 등 terminal 상태로 끝난 시각입니다. |
+
+#### 처리량과 오류
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `read_count` | `NUMBER(19) DEFAULT 0` | 원천에서 읽은 행 수입니다. 원천별 상세는 `inventory_sync_run_source`에 남기고, 이 값은 run 전체 진행량으로 사용합니다. |
+| `mapped_count` | `NUMBER(19) DEFAULT 0` | row map을 통해 canonical 대상으로 연결한 행 수입니다. 읽은 행과 실제 연결된 행을 구분할 수 있습니다. |
+| `changed_count` | `NUMBER(19) DEFAULT 0` | `record_hash`가 달라 실제 canonical 반영 대상이 된 행 수입니다. 0이면 스냅샷·자동 재조회 생략 판단에 사용됩니다. |
+| `error_count` | `NUMBER(19) DEFAULT 0` | 실행 중 기록된 오류 수입니다. `error_code`가 있을 때 증가하도록 mapper가 처리합니다. |
+| `error_code` | `VARCHAR2(100)` | 마지막으로 확정한 대표 오류 코드입니다. `SOURCE_CHANGED`, `LAUNCH_REJECTED`처럼 프론트와 운영자가 분기할 수 있는 값입니다. |
+| `error_message` | `VARCHAR2(2000)` | 대표 오류의 설명입니다. Oracle 컬럼 크기를 넘지 않도록 control service에서 저장 길이를 제한합니다. |
+| `created_at` | `TIMESTAMP` | run 행이 생성된 시각입니다. |
+| `updated_at` | `TIMESTAMP` | 상태·phase·heartbeat·카운터가 마지막으로 바뀐 시각입니다. 원천 행의 변경 감지 기준인 `record_hash`와는 역할이 다릅니다. |
+
+이 테이블의 핵심은 “동기화 결과를 한 번에 계산해 저장한다”가 아닙니다. 먼저 `QUEUED`로 접수한 뒤, 워커가 phase·heartbeat·카운터를 갱신하고, 마지막에 fencing 조건을 만족하는 시도만 terminal 상태로 바꿉니다.
+
+### 5.3 `inventory_source_row_map`: 원천 키와 canonical PK를 잇는 다리
+
+네 원천 테이블은 컬럼과 키 형식이 서로 다릅니다. 그래서 원천 행을 읽을 때마다 이름이나 SKU를 추측해 canonical을 찾지 않고, 미리 승인된 연결 정보를 `inventory_source_row_map`에 둡니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `source_row_map_id` | `NUMBER IDENTITY` | 매핑 행의 PK입니다. |
+| `source_type` | `VARCHAR2(20) NOT NULL` | `OFFLINE`, `ECOMMERCE`, `GREETING`, `WAREHOUSE` 중 어느 원천인지 구분합니다. |
+| `source_record_key` | `VARCHAR2(300) NOT NULL` | 원천 current 행을 식별하는 논리 키입니다. `source_type`과 함께 유니크라서 같은 원천 행에 매핑이 여러 개 생기지 않습니다. |
+| `product_id` | `NUMBER` | canonical `PRODUCT`의 PK입니다. 원천 상품과 연결할 때 사용하며, 원천 종류에 따라 비어 있을 수 있습니다. |
+| `sku_id` | `NUMBER` | canonical `SKU`의 PK입니다. 목록 조회와 수량 집계의 중심이 되는 상품 옵션을 가리킵니다. |
+| `sales_point_id` | `NUMBER` | 판매처의 canonical PK입니다. `SKU × 판매처` 위험 판정과 수요예측 범위를 결정합니다. |
+| `warehouse_id` | `NUMBER` | 물류센터의 canonical PK입니다. 미할당 물류센터 재고와 센터별 재고를 연결합니다. |
+| `lot_id` | `NUMBER` | canonical `LOT`의 PK입니다. 소비기한·판매중지일과 LOT 수량을 연결합니다. |
+| `inventory_balance_id` | `NUMBER` | canonical `INVENTORY_BALANCE`의 PK입니다. 원천 수량이 최종 재고 잔량으로 들어갈 위치입니다. |
+| `sku_channel_price_id` | `NUMBER` | 판매처별 SKU 가격 행의 PK입니다. 원천 가격을 canonical 가격으로 연결합니다. |
+| `sku_cost_id` | `NUMBER` | SKU 원가 행의 PK입니다. 원천 원가를 canonical 원가로 연결합니다. |
+| `inventory_policy_id` | `NUMBER` | 안전재고·목표재고 같은 정책 행의 PK입니다. 위험 판정에 필요한 정책을 연결합니다. |
+| `mapping_method` | `VARCHAR2(30) DEFAULT 'INITIAL_EXACT'` | 매핑이 어떻게 만들어졌는지 기록합니다. 현재 허용값은 초기 exact 매핑과 승인된 수동 매핑입니다. |
+| `mapping_status` | `VARCHAR2(30) DEFAULT 'MAPPED'` | `MAPPED`, `INVALID`, `REVIEW_REQUIRED` 중 현재 매핑 상태입니다. `countInvalidOrUnmapped()`가 유효하지 않은 행을 찾아 publish를 막습니다. |
+| `mapping_version` | `VARCHAR2(50) NOT NULL` | 어떤 매핑 규칙·버전으로 연결했는지 남깁니다. 나중에 매핑 규칙이 바뀌어도 당시 연결 기준을 추적할 수 있습니다. |
+| `validated_at` | `TIMESTAMP` | 매핑이 마지막으로 검증된 시각입니다. |
+| `created_at` / `updated_at` | `TIMESTAMP` | 매핑 행의 생성·수정 시각입니다. |
+| `created_by` / `updated_by` | `NUMBER NOT NULL` | 매핑을 만든 사용자와 마지막으로 수정한 사용자의 `app_user.user_id`입니다. |
+| `is_deleted` | `NUMBER(1) DEFAULT 0` | 매핑을 물리 삭제하지 않고 비활성화할 수 있는 soft delete 플래그입니다. |
+
+이 테이블은 네 원천 테이블에 직접 FK를 걸지 않습니다. 원천이 네 개의 서로 다른 테이블로 나뉘어 있어 하나의 FK로 연결할 수 없기 때문입니다. 대신 `(source_type, source_record_key)` 유니크 키와 `mapping_status`를 이용해 논리적으로 한 행을 찾고, canonical 대상 ID에는 각각 FK를 걸어 존재하지 않는 상품·SKU·LOT를 가리키지 못하게 합니다.
+
+### 5.4 `inventory_source_state`: 원천별 현재 버전과 미동기화 건수
+
+원천 데이터가 읽히는 동안 바뀌면 한 번의 동기화 안에서 서로 다른 시점의 데이터를 섞을 수 있습니다. `inventory_source_state`는 원천마다 현재 버전과 동기화 상태를 한 행씩 관리합니다. 현재 구현에서는 네 원천 타입에 대해 네 행을 사용합니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `source_type` | `VARCHAR2(20) NOT NULL` | 원천 종류의 PK입니다. 워커가 어느 원천의 버전·카운터를 읽는지 구분합니다. |
+| `current_version` | `NUMBER(19) DEFAULT 1` | 현재 원천 current 데이터의 버전입니다. 워커는 시작 시 이 값을 고정하고, 끝에 다시 읽어 바뀌었으면 `SOURCE_CHANGED`로 중단합니다. |
+| `current_record_count` | `NUMBER(19) DEFAULT 0` | 현재 원천에 있는 전체 행 수입니다. |
+| `pending_record_count` | `NUMBER(19) DEFAULT 0` | `record_hash`와 `synced_record_hash`가 달라 아직 반영되지 않은 행 수입니다. `refreshState`가 원천별로 다시 계산합니다. |
+| `last_verified_checksum` | `CHAR(64)` | 원천 전체 checksum을 검증했을 때 보관할 값입니다. 스키마에는 있지만 현재 일반 동기화 mapper가 갱신하는 핵심 기준은 `current_version`과 행별 hash입니다. |
+| `checksum_verified_version` | `NUMBER(19)` | 위 checksum이 어느 원천 버전에서 검증됐는지 나타냅니다. checksum과 함께 사용하는 보조 컬럼입니다. |
+| `last_changed_at` | `TIMESTAMP` | 원천 상태가 마지막으로 바뀐 시각입니다. |
+| `last_success_sync_run_id` | `NUMBER` | 이 원천을 마지막으로 성공적으로 반영한 `inventory_sync_run`의 ID입니다. FK로 실행 이력과 연결합니다. |
+| `last_success_synced_at` | `TIMESTAMP` | 마지막 성공 동기화 시각입니다. |
+| `created_at` / `updated_at` | `TIMESTAMP` | 상태 행의 생성·수정 시각입니다. |
+| `created_by` / `updated_by` | `NUMBER NOT NULL` | 상태 행을 만든 사용자와 수정한 사용자의 ID입니다. |
+
+`InventorySyncSourceWriteMapper.lockSourceState()`가 원천별 상태 행을 잠그는 이유도 여기에 있습니다. 버전을 읽고 상태를 갱신하는 사이에 다른 흐름이 같은 원천 상태를 바꾸지 않도록 하기 위해서입니다.
+
+### 5.5 `inventory_sync_run_source`: 한 run 안에서 원천별 진행을 나누어 기록
+
+`inventory_sync_run` 한 행만 보면 “전체가 몇 건 처리됐는가”는 알 수 있지만, 오프라인에서 실패했는지 이커머스에서 실패했는지는 알기 어렵습니다. `inventory_sync_run_source`는 한 run과 한 `source_type`의 조합마다 한 행을 만들어 원천별 진행을 기록합니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `inventory_sync_run_source_id` | `NUMBER IDENTITY` | 원천별 진행 행의 PK입니다. |
+| `inventory_sync_run_id` | `NUMBER NOT NULL` | 부모 `inventory_sync_run`을 가리킵니다. 부모 run이 삭제되면 `ON DELETE CASCADE`로 상세 진행 행도 함께 정리됩니다. |
+| `source_type` | `VARCHAR2(20) NOT NULL` | 네 원천 중 어느 작업인지 나타냅니다. `(run_id, source_type)` 유니크 제약으로 한 run에서 같은 원천 진행 행이 중복되지 않습니다. |
+| `start_version` | `NUMBER(19) NOT NULL` | 이 원천을 읽기 시작할 때 고정한 버전입니다. |
+| `end_version` | `NUMBER(19)` | 읽기를 끝냈을 때 확인한 버전입니다. 시작 버전과 달라졌는지 비교하는 경계 값입니다. |
+| `start_checksum` / `end_checksum` | `CHAR(64)` | 시작·종료 시점의 원천 checksum을 기록할 수 있는 컬럼입니다. 현재 mapper가 주로 갱신하는 값은 version, status, count, 시간이며 checksum은 스키마에 준비된 추적 필드입니다. |
+| `source_status` | `VARCHAR2(20) DEFAULT 'PENDING'` | `PENDING`, `RUNNING`, `SUCCESS`, `FAILED` 중 원천별 상태입니다. |
+| `read_count` | `NUMBER(19) DEFAULT 0` | 해당 원천에서 읽은 행 수입니다. |
+| `mapped_count` | `NUMBER(19) DEFAULT 0` | 해당 원천에서 canonical 매핑까지 성공한 행 수입니다. |
+| `changed_count` | `NUMBER(19) DEFAULT 0` | hash 비교 결과 실제 변경된 행 수입니다. |
+| `error_count` | `NUMBER(19) DEFAULT 0` | 해당 원천의 오류 카운터를 저장하는 컬럼입니다. 현재 `InventorySyncRunSourceMapper`는 시작할 때 0으로 초기화하고 `markFailed()`에서 상태를 실패로 바꾸지만, 이 경로에서 카운터를 증가시키지는 않습니다. |
+| `started_at` / `completed_at` | `TIMESTAMP` | 원천별 작업의 시작·종료 시각입니다. 전체 run이 아니라 어느 원천에서 시간이 걸렸는지 확인할 수 있습니다. |
+
+`InventorySyncRunSourceMapper.insertPendingSources()`는 실행 초기에 네 원천 행을 만들고, `insertRunSource()`가 실제 읽기를 시작할 때 `RUNNING`으로 바꿉니다. 이후 `updateProgress`, `incrementChanged`, `completeSource`, `markFailed`가 단계별 값을 갱신합니다. 다만 현재 코드에서 오류 카운터 증가까지 연결된 것은 아니고, 실행 전체의 `inventory_sync_run.error_count`가 대표 오류를 집계합니다.
+
+### 5.6 `inventory_sync_error`: 실패를 한 문장으로 뭉개지 않는 오류 기록
+
+run 행의 `error_code`, `error_message`는 프론트가 대표 실패를 빠르게 보여주기 위한 값입니다. 원천별·단계별 오류를 계속 남기려면 별도 행이 필요하므로 `inventory_sync_error`를 둡니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `inventory_sync_error_id` | `NUMBER IDENTITY` | 오류 행의 PK입니다. 한 run에서 여러 오류를 남길 수 있습니다. |
+| `inventory_sync_run_id` | `NUMBER NOT NULL` | 어느 동기화 실행에서 발생했는지 연결합니다. 부모 run 삭제 시 오류도 `ON DELETE CASCADE`로 정리됩니다. |
+| `source_type` | `VARCHAR2(20) NOT NULL` | 어느 원천과 관련된 오류인지 기록합니다. |
+| `source_record_key` | `VARCHAR2(300)` | 특정 원천 행에서 실패했다면 그 행의 키를 남기는 자리입니다. 현재 worker-level 오류에서는 비어 있을 수 있습니다. |
+| `error_phase` | `VARCHAR2(30) NOT NULL` | `READING`, `NORMALIZING`, `VALIDATING` 등 어느 단계에서 실패했는지 기록합니다. |
+| `field_name` | `VARCHAR2(100)` | 특정 컬럼 값이 문제인 경우 해당 필드명을 남기는 자리입니다. 현재 공통 실패 경로에서는 비어 있을 수 있습니다. |
+| `error_code` | `VARCHAR2(100) NOT NULL` | 프로그램이 분기할 수 있는 고정 오류 코드입니다. |
+| `error_message` | `VARCHAR2(2000) NOT NULL` | 사람이 확인할 수 있는 오류 설명입니다. |
+| `created_at` | `TIMESTAMP` | 오류가 기록된 시각입니다. |
+
+현재 `InventorySyncRunControlService.markWorkerFailed()`는 run을 잠근 뒤 원천 진행을 실패 처리하고, `source_type`, phase, code, message를 이 테이블에 기록합니다. 따라서 `source_record_key`와 `field_name`이 항상 채워진다고 설명하면 현재 코드보다 앞서 나간 설명이 됩니다.
+
+### 5.7 `inventory_sync_snapshot_task`: canonical 성공 뒤 집계를 안전하게 이어 가는 테이블
+
+대시보드와 재고 통계는 canonical publish와 별도 executor에서 실행합니다. 하지만 메모리 큐에만 넣으면 프로세스가 재시작할 때 작업을 잃을 수 있습니다. `V27`은 이 후속 작업을 DB에 먼저 저장하기 위해 `inventory_sync_snapshot_task`를 추가합니다.
+
+| 컬럼 | 타입 | 역할과 만든 이유 |
+| --- | --- | --- |
+| `inventory_sync_snapshot_task_id` | `NUMBER IDENTITY` | 스냅샷 task의 PK입니다. |
+| `inventory_sync_run_id` | `NUMBER NOT NULL` | 어느 canonical 동기화 뒤의 task인지 연결합니다. 부모 run 삭제 시 task도 cascade됩니다. |
+| `task_type` | `VARCHAR2(30) NOT NULL` | `DASHBOARD` 또는 `INVENTORY_STATISTICS` 중 후속 작업 종류입니다. `(run_id, task_type)` 유니크로 같은 run에 같은 task가 중복 생성되지 않습니다. |
+| `task_status` | `VARCHAR2(20) DEFAULT 'PENDING'` | `PENDING`, `RUNNING`, `RETRY_WAIT`, `SUCCEEDED`, `FAILED` 중 task 상태입니다. |
+| `business_date` | `DATE NOT NULL` | 스냅샷이 어느 업무일 기준인지 고정합니다. 실행이 자정을 넘어도 같은 task가 같은 날짜를 바라보게 합니다. |
+| `attempt_count` | `NUMBER(3) DEFAULT 0` | 실제 실행을 claim한 횟수입니다. claim할 때 증가합니다. |
+| `max_attempts` | `NUMBER(3) DEFAULT 3` | 재시도 가능한 최대 횟수입니다. `attempt_count <= max_attempts` 제약으로 무한 재시도를 막습니다. |
+| `next_attempt_at` | `TIMESTAMP` | `PENDING` 또는 `RETRY_WAIT` task를 다시 가져갈 수 있는 시각입니다. due index가 이 값을 기준으로 recovery 대상을 찾습니다. |
+| `lease_owner_instance_id` | `VARCHAR2(200)` | 현재 task를 실행 중인 worker 식별자입니다. 성공·실패 갱신 때 소유자가 같은지 확인합니다. |
+| `lease_expires_at` | `TIMESTAMP` | worker의 실행권 만료 시각입니다. 만료된 `RUNNING` task는 recovery 대상이 됩니다. |
+| `started_at` / `completed_at` | `TIMESTAMP` | task의 최초 실행 시작 시각과 최종 완료 시각입니다. |
+| `last_error_code` | `VARCHAR2(100)` | 마지막 시도의 오류 종류입니다. 재시도 가능한 오류와 결정적 오류를 구분해 남깁니다. |
+| `last_error_message` | `VARCHAR2(2000)` | 마지막 시도의 상세 오류입니다. |
+| `created_at` / `updated_at` | `TIMESTAMP` | task 행의 생성·마지막 상태 변경 시각입니다. |
+
+`prepareTasks()`는 canonical publish 트랜잭션 안에서 두 task를 `PENDING`으로 저장합니다. 커밋 후 `claimTask()`가 하나씩 `RUNNING`으로 바꾸고, 성공하면 `SUCCEEDED`, 일시적인 DB 오류면 `RETRY_WAIT`, 정해진 횟수를 모두 사용하면 `FAILED`로 바꿉니다. 즉 스냅샷 테이블 자체를 대체한 것이 아니라, 스냅샷을 만들기 위한 실행·재시도·복구 상태를 별도로 기록한 것입니다.
+
+### 5.8 7개 테이블이 실제 실행에서 만나는 순서
+
+컬럼을 따로 보면 복잡해 보이지만, 버튼 한 번의 흐름에 넣으면 역할이 분명해집니다.
+
+```text
+1. inventory_sync_mutex
+   → 제출 요청을 잠그고 동시에 들어온 실행을 직렬화
+
+2. inventory_sync_run
+   → clientRequestId로 멱등 실행을 찾거나 QUEUED run 생성
+
+3. inventory_sync_run_source
+   → 네 원천별 start_version과 진행 카운터를 준비
+
+4. inventory_source_state
+   → 원천별 current_version을 읽고, 읽는 동안 버전이 바뀌지 않았는지 확인
+
+5. inventory_source_row_map
+   → source_record_key를 PRODUCT·SKU·LOT·재고·정책 등의 canonical PK로 연결
+
+6. inventory_sync_error
+   → 매핑·읽기·검증·실행 오류가 나면 원천과 단계를 남김
+
+7. inventory_sync_snapshot_task
+   → canonical publish 커밋 뒤 대시보드·통계 task를 실행·재시도·복구
+```
+
+이 구조에서 원천 테이블은 “현재 들어온 외부 형식”을 보관하고, 7개 관리 테이블은 “그 데이터를 언제, 어떤 기준으로, 어디까지 canonical에 반영했는가”를 보관합니다. 둘을 한 테이블에 섞지 않았기 때문에 원천 포맷이 달라도 실행 상태와 복구 규칙은 공통으로 유지할 수 있습니다.
+
+### 5.9 제약조건과 인덱스도 이 구조의 일부입니다
+
+컬럼만 추가한다고 동시성이나 조회 문제가 자동으로 해결되지는 않습니다. Flyway는 잘못된 관계를 막는 제약조건과 자주 찾는 조건에 맞춘 인덱스도 함께 만듭니다.
+
+| 장치 | 적용 대상 | 만든 이유 |
+| --- | --- | --- |
+| `uq_isync_client_request` | `inventory_sync_run.client_request_id` | 같은 요청 키로 실행이 두 개 생기지 않게 합니다. |
+| `uq_isync_active_scope` | `inventory_sync_run.active_scope_key` | `INVENTORY_CANONICAL` 실행을 동시에 하나만 유지합니다. 완료 시 `NULL`로 바꾸는 이유도 이 제약을 다시 사용할 수 있게 하기 위해서입니다. |
+| `uq_isrc_map_key` | `inventory_source_row_map(source_type, source_record_key)` | 원천 종류와 키 조합마다 매핑을 하나만 둡니다. |
+| `uq_isync_run_source` | `inventory_sync_run_source(inventory_sync_run_id, source_type)` | 한 run 안에서 같은 원천의 진행 행이 중복되지 않게 합니다. |
+| `uq_isync_snapshot_task` | `inventory_sync_snapshot_task(inventory_sync_run_id, task_type)` | 한 run에 대시보드·통계 task가 각각 하나만 생기게 합니다. |
+| `ix_isync_request_rate` | `inventory_sync_run(requested_by, requested_at)` | 사용자별 최근 요청 수와 마지막 요청 시각을 빠르게 확인합니다. |
+| `ix_isync_status` | `inventory_sync_run(run_status, requested_at)` | 상태별 실행 이력을 접수 시각과 함께 찾을 수 있게 준비합니다. |
+| `ix_isrc_off_sync`, `ix_isrc_ecom_sync`, `ix_isrc_greet_sync`, `ix_isrc_wh_sync` | 네 원천 테이블 `(synced_record_hash, row_version)` | 아직 반영되지 않은 원천 행과 버전 조건으로 읽는 경로를 돕습니다. |
+| `ix_isrc_map_balance` | `inventory_source_row_map(inventory_balance_id, mapping_status)` | 하나의 canonical 재고에 여러 원천 매핑이 연결됐는지 검증하는 집계를 돕습니다. |
+| `ix_isync_error_run` | `inventory_sync_error(inventory_sync_run_id, source_type)` | 특정 run의 원천별 오류를 빠르게 조회합니다. |
+| `ix_isync_snapshot_task_due` | `inventory_sync_snapshot_task(task_status, next_attempt_at, lease_expires_at)` | 지금 재시도하거나 lease가 만료된 task를 recovery scanner가 찾는 조건입니다. |
+
+이 중 유니크 제약은 애플리케이션 검사의 보조 수단이 아니라 DB의 마지막 방어선입니다. 애플리케이션이 “없다”고 판단한 직후 다른 요청이 먼저 insert하는 경쟁 상황도 DB가 거절할 수 있어야 합니다.
+
+## 6. canonical에 넣기 전: 매핑과 입력을 먼저 닫습니다
 
 원천 행을 읽었다고 바로 정식 테이블을 수정하지 않습니다. 먼저 “이 원천 행이 어느 canonical 데이터를 가리키는지” 매핑이 맞는지 확인합니다.
 
@@ -261,7 +510,7 @@ FETCH NEXT #{limit} ROWS ONLY
 
 이 검사는 일부 데이터만 바뀐 뒤 실패하는 상황을 줄입니다. 이름이 비슷하다는 이유로 실행 중 대상을 추측하지 않고, 미리 연결해 둔 `inventory_source_row_map`의 대상만 사용합니다.
 
-### 5.1 `CanonicalInventoryRecord`는 내부 입력 경계입니다
+### 6.1 `CanonicalInventoryRecord`는 내부 입력 경계입니다
 
 `CanonicalInventoryRecord`는 정식 테이블에 쓰기 직전의 입력 경계입니다. 생성할 때 기본적인 값부터 확인합니다.
 
@@ -273,7 +522,7 @@ FETCH NEXT #{limit} ROWS ONLY
 
 이 객체 자체가 “통합재고 테이블”은 아닙니다. 여러 원천 행을 같은 모양으로 들고 있다가 다음 단계로 넘기는 메모리상의 입력 객체입니다.
 
-## 6. 왜 바뀐 행만 반영하는가: `record_hash`와 `synced_record_hash`
+## 7. 왜 바뀐 행만 반영하는가: `record_hash`와 `synced_record_hash`
 
 원천 데이터가 3만 건 이상이어도 매번 모든 canonical 행을 다시 쓸 필요는 없습니다. 원천 행의 현재 내용은 `record_hash`로, 마지막으로 반영한 내용은 `synced_record_hash`로 기억해 둡니다.
 
@@ -293,7 +542,7 @@ AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash
 
 반영이 성공한 뒤 `markOfflineSynced`, `markEcommerceSynced`, `markGreetingSynced`, `markWarehouseSynced`가 `synced_record_hash`, `last_sync_run_id`, `last_synced_at`을 기록합니다.
 
-### 6.1 `updated_at`을 원천 변경 감지의 기준으로 쓰지 않은 이유
+### 7.1 `updated_at`을 원천 변경 감지의 기준으로 쓰지 않은 이유
 
 `updated_at`만 비교하면 값은 그대로인데 저장 시각만 바뀐 행을 변경된 것으로 볼 수 있습니다. 반대로 외부 적재 방식에 따라 값은 바뀌었는데 시각이 제대로 갱신되지 않을 수도 있습니다. 그래서 현재 구현은 행의 실제 내용에서 만든 `record_hash`를 변경 감지에 사용합니다.
 
@@ -308,7 +557,7 @@ AND (src.synced_record_hash IS NULL OR src.record_hash != src.synced_record_hash
 
 즉 `updated_at` 하나로 모든 변경을 판단하지 않습니다. 데이터 종류에 따라 “마지막으로 갱신된 시각”이라는 보조 정보로 사용합니다.
 
-### 6.2 canonical MERGE도 실제 값이 다를 때만 갱신합니다
+### 7.2 canonical MERGE도 실제 값이 다를 때만 갱신합니다
 
 예를 들어 재고 수량 MERGE는 대상 ID로 행을 찾은 뒤, 수량이 달라질 때만 `updated_at`을 바꿉니다.
 
@@ -324,11 +573,11 @@ WHERE NVL(target.on_hand_qty, -1) != NVL(source.on_hand_qty, -1)
 
 이렇게 하면 값이 그대로인 실행 때문에 모든 행의 감사 시각이 새로 바뀌는 일을 막을 수 있습니다.
 
-## 7. publish 트랜잭션: 참조 데이터와 재고를 500건씩 쓰되, 게시 경계는 하나입니다
+## 8. publish 트랜잭션: 참조 데이터와 재고를 500건씩 쓰되, 게시 경계는 하나입니다
 
 `InventorySyncPublisher.publish()`는 한 번의 publish를 `@Transactional`로 묶습니다. 안에서는 500건씩 나눠 쓰지만, 500건마다 사용자에게 “성공”을 알리는 구조는 아닙니다. 500건은 메모리와 SQL 파라미터 크기를 관리하기 위한 배치 단위입니다.
 
-### 7.1 실제 반영 순서
+### 8.1 실제 반영 순서
 
 `InventorySyncCanonicalBatchWriter`는 먼저 연결된 참조 대상을 반영합니다.
 
@@ -359,7 +608,7 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 
 `fencingToken`은 실행 세대를 나타내는 번호입니다. 작업이 복구되거나 새 시도가 시작된 뒤 예전 워커가 늦게 돌아와도, 이 번호가 다르면 쓰기를 거절합니다.
 
-### 7.2 중간 batch가 실패하면 어떻게 되는가
+### 8.2 중간 batch가 실패하면 어떻게 되는가
 
 코드의 의도는 canonical 반영, LOT 상태 갱신, 위험 판정 저장을 하나의 게시 트랜잭션으로 처리하는 것입니다. 중간 SQL에서 오류가 나면 이번 publish는 rollback되고 이전에 성공한 데이터가 남습니다. 실행 상태는 `FAILED`로 기록합니다.
 
@@ -373,11 +622,11 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 
 현재 구현은 첫 번째 선택입니다. 데이터가 더 커지면 “배치마다 커밋”으로 바로 바꾸기보다, 실행 세대·재시작 지점·스냅샷 기준을 함께 다시 설계해야 합니다.
 
-## 8. 재고 상태와 위험 판정: 어떤 값을 어떻게 계산하는가
+## 9. 재고 상태와 위험 판정: 어떤 값을 어떻게 계산하는가
 
 이 절의 `v1.7.0` 설명은 현재 작업 트리의 `BackEnd/docs/inventory-risk-grade-policy.md`와 변경된 `RiskRuleEngine`을 기준으로 합니다. 아직 `develop`에 병합된 최종 정책이라고 단정하지 않습니다.
 
-### 8.1 판정 단위는 `SKU × 판매처`입니다
+### 9.1 판정 단위는 `SKU × 판매처`입니다
 
 같은 SKU라도 판매처마다 안전재고와 수요예측이 다를 수 있습니다. 그래서 위험 판정은 `SKU × 판매처` 단위(scope)로 계산합니다. 여기서 scope는 “이번에 함께 계산할 한 묶음”이라는 뜻입니다.
 
@@ -385,7 +634,7 @@ for (CanonicalInventoryRecord record : buffer.records()) {
 - 둘 다 없으면 물류센터 미할당 재고인 `UNASSIGNED` scope로 둡니다.
 - `UNASSIGNED` 재고에 특정 판매처의 예측이나 가격을 복사하지 않습니다.
 
-### 8.2 LOT 상태는 원천 상태를 그대로 믿지 않고 다시 계산합니다
+### 9.2 LOT 상태는 원천 상태를 그대로 믿지 않고 다시 계산합니다
 
 현재 작업 트리는 원천의 `lot_status`를 그대로 최종 상태로 쓰지 않습니다. 판정 기준일, 날짜, 같은 LOT의 통합 잔량을 다시 확인해 최종 상태를 정합니다.
 
@@ -414,7 +663,7 @@ availableQty
 
 예약 수량은 LOT 상태를 판단할 때 통합 잔량에 포함하지만, 판매 가능 재고에서 제외할 때는 코드가 계산하는 `on_hand_qty` 기준을 따릅니다. 이 구분을 섞으면 예약 수량을 두 번 빼는 오류가 생길 수 있습니다.
 
-### 8.3 수요예측은 사용할 수 있는지 먼저 판정합니다
+### 9.3 수요예측은 사용할 수 있는지 먼저 판정합니다
 
 현재 작업 트리는 아래 조건을 만족하는 수요예측만 사용합니다.
 
@@ -427,7 +676,7 @@ availableQty
 
 예측이 없거나 유효하지 않아도 현재 재고·LOT·안전재고 규칙까지 모두 끄는 것은 아닙니다. 미래 수요 기반 규칙만 사용하지 않고, 현재 값으로 판단할 수 있는 영역은 계속 판정합니다.
 
-### 8.4 30일 예상 폐기량은 판매 종료일까지 남은 수요를 비교합니다
+### 9.4 30일 예상 폐기량은 판매 종료일까지 남은 수요를 비교합니다
 
 30일 안에 판매가 끝나는 `AVAILABLE` LOT만 대상으로 합니다. 이미 `EXPIRED`, `SALE_STOPPED`, `DEPLETED`인 LOT는 계산에서 뺍니다.
 
@@ -454,7 +703,7 @@ X90 = max(0, remainingSellable(90) - safetyStockQty)
 
 장기 신호만으로 `DANGER`를 만들지 않고, 중기·장기 조건은 `CAUTION` 또는 `NORMAL` 범위에서 사용합니다. 5%, 20%, 7일, 14일, 30일은 법정 기준이 아니라 현재 정책 문서가 정의한 초기 운영 임계값입니다.
 
-### 8.5 여러 위험이 동시에 있으면 대표 사유를 하나로 정합니다
+### 9.5 여러 위험이 동시에 있으면 대표 사유를 하나로 정합니다
 
 엔진은 재고 부족, 안전재고 미달, 예상 폐기, LOT 제외, 예측 품질을 각각 계산합니다. 여러 조건이 동시에 맞으면 그중 심각도가 가장 높은 조건을 최종 등급으로 고릅니다.
 
@@ -472,7 +721,7 @@ X90 = max(0, remainingSellable(90) - safetyStockQty)
 
 최종 등급은 `CRITICAL > WARNING > NORMAL > GOOD` 순서로 고릅니다. API 응답으로 보낼 때는 `DANGER`, `CAUTION`, `NORMAL`, `SAFE`로 바꿉니다. 같은 심각도의 조건이 여러 개면 정해 둔 우선순위에 따라 `reason_message` 하나를 선택합니다.
 
-### 8.6 왜 위험 판정 시각을 하나로 고정하는가
+### 9.6 왜 위험 판정 시각을 하나로 고정하는가
 
 동기화가 자정을 넘길 수 있습니다. LOT 상태는 23:59, 위험 사유는 00:01 기준으로 계산하면 한 run 안에 서로 다른 날짜가 섞입니다. 그래서 현재 작업 트리는 run의 `startedAt`을 `assessmentInstant`로 넘기고, 서울 기준일도 그 시각에서 계산합니다.
 
@@ -485,7 +734,7 @@ run.startedAt
 
 이 시각은 계산을 편하게 하려고 넣은 값이 아닙니다. 한 번의 동기화가 어느 시점의 데이터였는지 나중에 다시 확인하기 위한 기준입니다.
 
-### 8.7 `reason_message`는 프론트에서 다시 만들지 않습니다
+### 9.7 `reason_message`는 프론트에서 다시 만들지 않습니다
 
 현재 작업 트리의 `v1.7.0` 엔진은 날짜·수량·비율을 채운 한국어 핵심 사유를 서버에서 만듭니다. 프론트엔드는 이 문장을 다시 선택하거나 영문 evidence를 조합하지 않고 그대로 표시합니다.
 
@@ -493,7 +742,7 @@ run.startedAt
 
 다만 이 내용은 현재 작업 트리 기준입니다. 첫 전체 재동기화 전의 legacy 사유와 하위 호환 parser가 남아 있으므로, 배포 후 실제 데이터가 모두 새 규칙으로 갱신됐는지 확인해야 합니다.
 
-## 9. publish 마지막에 변경 범위만 다시 계산합니다
+## 10. publish 마지막에 변경 범위만 다시 계산합니다
 
 버퍼에는 재고 행뿐 아니라 위험을 다시 계산해야 하는 scope도 함께 모읍니다. 현재 작업 트리의 `InventorySyncCanonicalBatchWriter.finish()`는 다음 범위를 합칩니다.
 
@@ -513,7 +762,7 @@ scopesToEvaluate
 
 이렇게 해야 원천 데이터가 그대로여도 오늘 판매 종료일에 도달한 LOT를 놓치지 않습니다.
 
-## 10. canonical 커밋 뒤 대시보드와 통계 스냅샷을 만듭니다
+## 11. canonical 커밋 뒤 대시보드와 통계 스냅샷을 만듭니다
 
 대시보드와 통계는 canonical publish 트랜잭션 안에서 바로 계산하지 않습니다. 먼저 snapshot task 행만 저장하고, canonical 커밋이 끝난 뒤 별도 executor가 실제 집계를 시작합니다.
 
@@ -537,11 +786,11 @@ scopesToEvaluate
 
 반대로 “집계까지 모두 끝나야 동기화 성공”으로 묶으면 화면 상태는 단순해집니다. 하지만 집계가 오래 걸리거나 한 집계만 실패해도 원천 동기화까지 실패한 것처럼 보입니다. 현재 구현은 canonical publish 성공과 snapshot 준비 상태를 따로 보여줍니다.
 
-## 11. 프론트엔드는 마지막에 상태를 폴링하고 화면을 갱신합니다
+## 12. 프론트엔드는 마지막에 상태를 폴링하고 화면을 갱신합니다
 
 프론트엔드는 동기화가 끝날 때까지 원천 행 전체를 반복해서 읽지 않습니다. 실행 상태를 담은 `latest`와 특정 run의 상세만 확인합니다.
 
-### 11.1 상태별 폴링 간격
+### 12.1 상태별 폴링 간격
 
 `inventorySyncQueries.js`의 현재 간격은 다음과 같습니다.
 
@@ -562,7 +811,7 @@ const POLL_INTERVAL_BY_STATUS_MS = Object.freeze({
 
 `latest`는 화면에 다시 들어오거나 연결이 끊겼다가 돌아왔을 때 확인합니다. 실행 ID를 찾으면 그 뒤에는 해당 run 상세 쿼리 하나만 반복합니다. 같은 실행을 `latest`와 detail에서 동시에 폴링하지 않도록 한 것입니다.
 
-### 11.2 성공했다고 바로 모든 캐시를 갱신하지 않습니다
+### 12.2 성공했다고 바로 모든 캐시를 갱신하지 않습니다
 
 run이 `SUCCEEDED`이고 `changedCount > 0`이면 프론트엔드는 0~3초 뒤 다음 쿼리를 invalidate합니다. 여기서 invalidate는 “다음에 다시 읽어야 하는 오래된 캐시”라고 표시하는 동작입니다.
 
@@ -576,7 +825,7 @@ run이 `SUCCEEDED`이고 `changedCount > 0`이면 프론트엔드는 0~3초 뒤 
 
 이 흐름 덕분에 사용자는 “동기화 자체는 성공했지만 대시보드 집계가 아직 준비되지 않음”을 구분해서 볼 수 있습니다.
 
-### 11.3 화면에서 마지막 결과가 보이는 시점
+### 12.3 화면에서 마지막 결과가 보이는 시점
 
 ```text
 QUEUED
@@ -591,7 +840,7 @@ QUEUED
 
 변경 건수가 0이면 snapshot task를 만들지 않고, 재고 목록도 자동으로 다시 요청하지 않습니다. 같은 데이터를 다시 읽어 깜빡이게 하지 않기 위한 선택입니다.
 
-## 12. 중복·재시도·실패는 어떻게 한 흐름으로 이어지는가
+## 13. 중복·재시도·실패는 어떻게 한 흐름으로 이어지는가
 
 | 상황 | 서버 동작 | 프론트 동작 |
 | --- | --- | --- |
@@ -606,7 +855,7 @@ QUEUED
 
 여기서 중요한 점은 모든 실패를 “처음부터 다시 실행”으로 처리하지 않는 것입니다. 같은 요청인지, 이미 실행이 있는지, 실행 중 데이터가 바뀌었는지에 따라 재시도 방법이 달라집니다.
 
-## 13. 왜 이 계산은 백엔드에 있고, 이 연산은 DB에 있는가
+## 14. 왜 이 계산은 백엔드에 있고, 이 연산은 DB에 있는가
 
 DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 일을 나눴습니다.
 
@@ -622,9 +871,9 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 
 위험 규칙까지 전부 DB 프로시저로 만들면 DB 안에서 계산하기는 편하지만, Java 테스트·정책 버전·응답 메시지를 함께 관리하기가 어려워집니다. 반대로 약 97,014개의 `INVENTORY_BALANCE` 행과 여러 관계를 Java로 모두 읽어 집계하면 네트워크와 애플리케이션 메모리 부담이 커집니다. 이 숫자는 코드에 박힌 한도가 아니라 당시 데이터 규모입니다. 그래서 SQL은 대량 데이터 선별·갱신을 맡고, Java는 실행 순서와 정책 계산을 맡겼습니다.
 
-## 14. 선택지와 트레이드오프
+## 15. 선택지와 트레이드오프
 
-### 14.1 동기 API와 비동기 실행
+### 15.1 동기 API와 비동기 실행
 
 | 선택 | 장점 | 단점 | 현재 선택 |
 | --- | --- | --- | --- |
@@ -632,7 +881,7 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 | `QUEUED` 저장 + 워커 | 재시작·폴링·감사에 유리 | 최종 결과를 별도로 추적해야 함 | 사용 |
 | 메시지 브로커 | 서버 간 확장성이 큼 | 운영 인프라와 전달 보장이 추가됨 | 현재 범위 아님 |
 
-### 14.2 비관적 락과 낙관적 충돌 처리
+### 15.2 비관적 락과 낙관적 충돌 처리
 
 | 선택 | 장점 | 단점 |
 | --- | --- | --- |
@@ -642,7 +891,7 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 
 현재는 Oracle guard 행 잠금과 active-scope 유니크 제약을 사용합니다. 여러 DB 리전이나 독립 서비스로 분리할 때 분산 락을 검토할 수 있지만, 현재 코드에 구현된 기능으로 쓰면 안 됩니다.
 
-### 14.3 hash와 `updated_at`
+### 15.3 hash와 `updated_at`
 
 | 기준 | 잘 맞는 상황 | 주의점 |
 | --- | --- | --- |
@@ -652,7 +901,7 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 
 현재 구현은 원천 canonical publish에는 hash를, 작업 트리 `v1.7.0`의 forecast freshness에는 `updated_at`을 사용합니다. 한 필드로 모든 변경을 판단하지 않는 이유가 여기에 있습니다.
 
-### 14.4 폴링과 실시간 push
+### 15.4 폴링과 실시간 push
 
 | 선택 | 장점 | 단점 | 현재 선택 |
 | --- | --- | --- | --- |
@@ -661,7 +910,7 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 
 현재 실행 상태는 3초·10초 폴링으로 충분하다고 판단했습니다. 실행량과 사용자 수가 커져 폴링 요청이 병목이 되면 push 방식을 검토할 수 있습니다.
 
-## 15. 데이터가 더 많아졌을 때의 확장성
+## 16. 데이터가 더 많아졌을 때의 확장성
 
 현재 구조에는 확장에 도움이 되는 장치가 이미 있습니다.
 
@@ -692,7 +941,7 @@ DB와 백엔드 중 하나만 고른 것이 아니라, 각 계층이 잘하는 �
 - snapshot task의 완전한 장기 lease 모델과 대규모 분산 실행은 추가 검토가 필요합니다.
 - Full backend test는 작성 시점에 여러 Gradle 테스트 프로세스가 XML 결과 파일을 동시에 쓰면서 실패했으므로, 깨끗한 환경에서 단독 재실행이 필요합니다.
 
-## 16. 작성 시점에 확인한 코드와 테스트
+## 17. 작성 시점에 확인한 코드와 테스트
 
 ### 관련 테스트 확인 범위
 
@@ -712,7 +961,7 @@ InventoryQuantitySqlContractTest
 
 전체 백엔드 테스트는 동시에 실행된 Gradle 프로세스가 XML 결과 파일을 서로 덮어쓰는 환경 문제로 실패했습니다. 따라서 이 글은 “전체 테스트가 모두 통과했다”고 말하지 않고, 위의 선택 테스트와 코드 검토 범위만 기록합니다.
 
-## 17. 정리: 버튼 하나보다 중요한 것은 경계입니다
+## 18. 정리: 버튼 하나보다 중요한 것은 경계입니다
 
 이 기능에서 가장 어려웠던 점은 원천 테이블을 읽는 SQL 자체보다, 각 단계의 경계를 정하는 일이었습니다.
 

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">통합재고 동기화를 위한 7개 관리 테이블</title>
+  <desc id="desc">동기화 실행을 중심으로 원천 상태, 원천별 진행 상태, 원천과 canonical을 잇는 매핑, 오류, 스냅샷 작업을 기록하는 일곱 개 관리 테이블의 관계</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .heading { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0f172a; }
+      .field { font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334155; }
+      .note { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #475569; }
+      .run { fill: #dbeafe; stroke: #60a5fa; stroke-width: 2; }
+      .bridge { fill: #ecfdf5; stroke: #34d399; stroke-width: 2; }
+      .control { fill: #fff7ed; stroke: #fb923c; stroke-width: 2; }
+      .task { fill: #f5f3ff; stroke: #a78bfa; stroke-width: 2; }
+      .line { stroke: #2563eb; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke-dasharray: 8 7; }
+    </style>
+  </defs>
+  <rect width="1440" height="900" rx="28" fill="#ffffff"/>
+  <text x="60" y="58" class="title">원천 데이터를 합치는 동안의 실행 기록과 연결 정보</text>
+  <text x="60" y="88" class="note">V21에서 6개 관리 테이블을 만들고, V27에서 스냅샷 task를 추가해 총 7개를 사용합니다.</text>
+
+  <rect x="580" y="145" width="280" height="170" rx="18" class="run"/>
+  <text x="720" y="178" text-anchor="middle" class="heading">inventory_sync_run</text>
+  <text x="610" y="210" class="field">run_id · client_request_id</text>
+  <text x="610" y="234" class="field">run_status · current_phase</text>
+  <text x="610" y="258" class="field">attempt · fencing · lease</text>
+  <text x="610" y="282" class="field">counts · error · timestamps</text>
+
+  <rect x="80" y="145" width="280" height="140" rx="18" class="control"/>
+  <text x="220" y="178" text-anchor="middle" class="heading">inventory_sync_mutex</text>
+  <text x="110" y="214" class="field">mutex_id = 1</text>
+  <text x="110" y="238" class="field">created_at</text>
+  <text x="110" y="268" class="note">제출 경쟁을 한 줄로 세움</text>
+
+  <rect x="1000" y="130" width="330" height="175" rx="18" class="control"/>
+  <text x="1165" y="163" text-anchor="middle" class="heading">inventory_source_state</text>
+  <text x="1030" y="197" class="field">source_type · current_version</text>
+  <text x="1030" y="221" class="field">record_count · pending_count</text>
+  <text x="1030" y="245" class="field">checksum · last_changed_at</text>
+  <text x="1030" y="269" class="field">last_success_sync_run_id</text>
+
+  <rect x="60" y="420" width="350" height="210" rx="18" class="bridge"/>
+  <text x="235" y="453" text-anchor="middle" class="heading">inventory_source_row_map</text>
+  <text x="90" y="489" class="field">source_type · source_record_key</text>
+  <text x="90" y="513" class="field">product · sku · sales_point · warehouse</text>
+  <text x="90" y="537" class="field">lot · balance · price · cost · policy</text>
+  <text x="90" y="561" class="field">mapping_method · mapping_status · version</text>
+  <text x="90" y="585" class="note">원천 키 → canonical PK 연결</text>
+
+  <rect x="500" y="420" width="350" height="210" rx="18" class="bridge"/>
+  <text x="675" y="453" text-anchor="middle" class="heading">inventory_sync_run_source</text>
+  <text x="530" y="489" class="field">run_id · source_type</text>
+  <text x="530" y="513" class="field">start_version · end_version</text>
+  <text x="530" y="537" class="field">source_status · read/mapped/changed</text>
+  <text x="530" y="561" class="field">error_count · started/completed_at</text>
+  <text x="530" y="585" class="note">한 run 안의 원천별 진행판</text>
+
+  <rect x="940" y="420" width="350" height="210" rx="18" class="control"/>
+  <text x="1115" y="453" text-anchor="middle" class="heading">inventory_sync_error</text>
+  <text x="970" y="489" class="field">run_id · source_type</text>
+  <text x="970" y="513" class="field">source_record_key · field_name</text>
+  <text x="970" y="537" class="field">error_phase · error_code</text>
+  <text x="970" y="561" class="field">error_message · created_at</text>
+  <text x="970" y="585" class="note">실패 원인과 위치를 남김</text>
+
+  <rect x="500" y="720" width="350" height="125" rx="18" class="task"/>
+  <text x="675" y="753" text-anchor="middle" class="heading">inventory_sync_snapshot_task</text>
+  <text x="530" y="789" class="field">run_id · task_type · business_date</text>
+  <text x="530" y="813" class="field">status · attempts · lease · retry</text>
+  <text x="530" y="837" class="note">대시보드·통계 후속 작업</text>
+
+  <path d="M360 215 H580" class="line dashed"/>
+  <path d="M860 215 H1000" class="line"/>
+  <path d="M720 315 V420" class="line"/>
+  <path d="M580 315 L300 420" class="line"/>
+  <path d="M860 315 L1090 420" class="line"/>
+  <path d="M675 630 V720" class="line"/>
+
+  <text x="60" y="875" class="note">점선: 직접 FK가 없는 제출 잠금 관계 · 실선: inventory_sync_run을 기준으로 연결되는 실행·진행·오류·후속 작업</text>
+</svg>
