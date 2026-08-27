@@ -1,0 +1,223 @@
+---
+title: "Lighthouse 35점 화면에서 첫 렌더링 경로를 다시 설계한 과정"
+date: "2026-08-27"
+lastModified: "2026-08-27"
+published: true
+section: "개발 기록"
+category: "Frontend / Performance"
+tags: ["StockFit", "Lighthouse", "React", "Core Web Vitals", "Code Splitting", "Lazy Loading", "CLS"]
+cover: "/images/blog/lighthouse-critical-rendering-path-ai.png"
+coverAlt: "첫 화면에 필요한 자원만 먼저 내려보내고 나머지 자원을 뒤로 미루는 렌더링 경로 비교 구조도"
+coverFit: "contain"
+description: "통합재고 API를 줄인 뒤에도 느렸던 첫 화면을 Lighthouse 캡처와 실제 React 코드 변경으로 분석하고, 라우트·3D·이미지·스켈레톤을 어떤 순서로 늦췄는지 정리합니다."
+---
+
+> StockFit 성능 개선 기록 · **서버 응답 다음에 남은 브라우저의 첫 화면을 줄이는 단계**
+
+[통합재고 동기화 흐름](/blog/integrated-inventory-sync-flow)에서 서로 다른 원천 데이터를 정규화하고, 동기화 중복·동시 실행·위험 판정·스냅샷 준비를 하나의 실행 순서로 묶은 과정을 먼저 설명했습니다. 이번 글은 그 결과가 화면에 나타나기까지 남은 브라우저 렌더링 병목을 다룹니다.
+
+그런데 API 응답 시간이 줄어도 사용자가 바로 화면을 보는 것은 아니었습니다. 브라우저는 현재 라우트에 필요하지 않은 JavaScript, 처음부터 보이지 않는 썸네일, 화면을 열어야만 쓰는 차트와 라이트박스까지 한꺼번에 준비하고 있었습니다.
+
+이번 글은 “Lighthouse 점수를 올렸다”는 결과만 적는 글이 아닙니다. **어떤 자원을 첫 화면의 필수 경로에서 빼고, 그 자리가 바뀌지 않도록 어떻게 화면을 고정했는지**를 실제 코드와 측정 캡처로 이어서 설명합니다.
+
+## 먼저 Lighthouse 숫자를 같은 화면에서 읽었다
+
+Lighthouse는 정해진 조건에서 페이지를 한 번 불러와 성능을 측정하는 도구입니다. 여기서 보는 점수는 실제 모든 사용자의 평균이 아니라 **해당 캡처가 만들어진 실험 조건의 기록**입니다.
+
+처음부터 지표 이름을 나눠 두면 숫자를 잘못 해석하기 어렵습니다.
+
+| 지표 | 쉬운 뜻 |
+| --- | --- |
+| FCP (First Contentful Paint) | 화면에 첫 콘텐츠가 나타난 시점 |
+| LCP (Largest Contentful Paint) | 가장 큰 주요 콘텐츠가 나타난 시점 |
+| TBT (Total Blocking Time) | 브라우저의 `main thread`(화면 그리기와 사용자 입력을 처리하는 핵심 실행 흐름)를 JavaScript가 막은 누적 시간 |
+| CLS (Cumulative Layout Shift) | 로딩 중 화면 요소가 갑자기 밀린 정도 |
+
+제공된 캡처에서 확인할 수 있는 값은 다음과 같습니다.
+
+| 화면 | 개선 전 | 개선 후 |
+| --- | --- | --- |
+| 대시보드 | 성능 47, 접근성 95, 권장사항 100, SEO 83 / FCP 3.0초, LCP 8.3초, TBT 240ms, CLS 0 | 성능 99, 접근성 100, 권장사항 100, SEO 100 / FCP 0.6초, LCP 0.9초, TBT 40ms, CLS 0 |
+| 통합재고 | 성능 35, 접근성 93, 권장사항 100, SEO 83 / FCP 9.7초, LCP 19.4초, TBT 10ms, CLS 0.449 | 성능 99, 접근성 100, 권장사항 100, SEO 100 / FCP 0.6초, LCP 0.8초, TBT 0ms, CLS 0.013 |
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/lighthouse-dashboard-before.png" alt="대시보드 Lighthouse 개선 전 점수와 FCP 3초, LCP 8.3초, TBT 240밀리초 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">대시보드 · 개선 전 캡처</figcaption>
+  </figure>
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/lighthouse-dashboard-after.png" alt="대시보드 Lighthouse 개선 후 점수와 FCP 0.6초, LCP 0.9초, TBT 40밀리초 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">대시보드 · 개선 후 캡처</figcaption>
+  </figure>
+</div>
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-2 not-prose my-6">
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/lighthouse-inventory-before.png" alt="통합재고 Lighthouse 개선 전 점수와 FCP 9.7초, LCP 19.4초, CLS 0.449 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">통합재고 · 개선 전 캡처</figcaption>
+  </figure>
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/lighthouse-inventory-after.png" alt="통합재고 Lighthouse 개선 후 점수와 FCP 0.6초, LCP 0.8초, CLS 0.013 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">통합재고 · 개선 후 캡처</figcaption>
+  </figure>
+</div>
+
+통계 화면은 개선 전 캡처만 있고 대응하는 개선 후 캡처가 없어 점수의 전후 비교에는 넣지 않았습니다. 다만 어떤 상태에서 출발했는지 확인할 수 있도록 원본을 남깁니다.
+
+<figure className="not-prose my-6">
+  <ZoomableImage src="/images/blog/lighthouse-statistics-before.png" alt="통계 화면 Lighthouse 개선 전 성능 58점, FCP 2.1초, LCP 9.5초, TBT 120밀리초 기록" className="w-full max-w-2xl object-contain" />
+  <figcaption className="mt-2 text-xs text-foreground/60">통계 화면 · 개선 전 캡처만 제공됨</figcaption>
+</figure>
+
+이 표에서 중요한 단서는 화면마다 달랐습니다. 대시보드는 TBT가 240ms였으므로 JavaScript가 메인 스레드를 막는 문제도 있었습니다. 반면 통합재고는 TBT가 10ms인데 FCP와 LCP가 각각 9.7초와 19.4초였습니다. 통합재고의 첫 화면은 긴 JavaScript 실행 하나만의 문제가 아니라, **필요하지 않은 자원까지 처음부터 요청하고 콘텐츠 위치가 안정되지 않은 문제**를 함께 봐야 했습니다.
+
+두 캡처는 동일 조건을 여러 번 반복한 평균이나 p95가 아닙니다. 따라서 특정 코드 한 줄이 점수를 몇 퍼센트 올렸다고 계산하지 않고, 캡처에서 보이는 전체 전후 변화와 코드에 남은 의도를 함께 기록합니다.
+
+## 첫 화면에 필요한 것과 나중에 필요한 것을 나눴다
+
+브라우저가 시작할 때 모든 기능을 같은 우선순위로 받으면 첫 화면은 가장 무거운 기능을 기다리게 됩니다. 아래 그림은 이번 변경을 한 문장으로 줄인 것입니다.
+
+![첫 화면 필수 자원과 이후 자원을 분리한 렌더링 경로 구조도](/images/blog/lighthouse-critical-rendering-path-ai.png)
+
+그림의 “나중”은 기능을 삭제했다는 뜻이 아닙니다. 현재 라우트에 들어왔을 때, 화면을 열었을 때, 썸네일이 뷰포트 근처에 들어왔을 때처럼 **사용할 가능성이 생긴 시점으로 요청을 옮겼다**는 뜻입니다.
+
+## 1. 라우트 파일을 처음부터 모두 받지 않게 했다
+
+라우터에는 로그인, 대시보드, 통합재고, AI 전략, 실행 관제, 통계 등 각 페이지를 `lazy(() => import(...))`로 등록했습니다. `lazy`는 해당 컴포넌트가 렌더링될 때까지 모듈을 불러오지 않는 React 기능입니다.
+
+인증된 사용자가 통합재고로 들어갈 때 다른 페이지의 큰 화면 코드까지 함께 내려받을 이유는 없습니다. `AuthGuard`에는 통합재고·대시보드·통계·실행 목록에 맞춘 로딩 스켈레톤을 연결했습니다. 스켈레톤 모듈이 준비된 뒤에는 페이지 모듈을 기다리는 동안 해당 화면의 형태를 먼저 보여줍니다.
+
+이 변경은 화면을 작게 만드는 작업이 아니라 **초기 JavaScript의 경계를 라우트 단위로 자르는 작업**입니다. 첫 화면에 필요하지 않은 페이지 코드는 현재 경로의 렌더링 경로에서 빠집니다.
+
+## 2. 3D 관제 장면은 데이터와 장치가 준비된 뒤에 시작했다
+
+통합재고 위치 개요에는 WebGL(브라우저에서 GPU를 이용해 2D·3D를 그리는 API)로 그리는 3D 장면이 있습니다. 이 장면은 모든 브라우저와 모든 화면 크기에서 즉시 필요한 요소가 아니므로 다음 조건을 모두 만족할 때만 활성화합니다.
+
+```js
+const sceneEnabled = desktopSceneAvailable && webglAvailable && locations.length > 0;
+const sceneReady = useDeferredScene(sceneEnabled);
+```
+
+`supportsWebGL()`은 브라우저가 WebGL 또는 WebGL2 컨텍스트를 만들 수 있는지 확인합니다. 화면 폭이 640px 미만이면 데스크톱 장면을 켜지 않고, 위치 데이터가 비어 있어도 모듈을 불러오지 않습니다.
+
+조건이 맞아도 즉시 import하지 않습니다. `useDeferredScene`은 180ms 뒤에 시작 예약을 하고, 브라우저가 지원하면 `requestIdleCallback`에 최대 900ms의 제한을 둡니다. `requestIdleCallback`은 브라우저가 한가할 때 작업을 시작하도록 예약하는 API입니다. 지원하지 않는 브라우저에서는 예약 후 바로 시작합니다.
+
+이렇게 하면 첫 텍스트와 표가 그려지는 순간 3D 모듈과 GLB(3D 모델을 담는 파일 형식) 데이터가 경쟁하지 않습니다. 3D를 포기한 것이 아니라 **첫 화면의 작업이 끝난 뒤에 3D를 합류시킨 것**입니다.
+
+## 3. 클릭하기 전에는 상세 기능을 내려받지 않았다
+
+통합재고 테이블에서 상세 서랍, 전략 요청 모달, 이미지 라이트박스, 수요예측 차트는 페이지를 열자마자 보이지 않습니다. 이 컴포넌트들은 `lazy`로 분리하고, 사용자가 해당 기능을 열 때 `Suspense`(비동기 컴포넌트가 준비될 때 대체 UI를 보여주는 React 기능) 경계 안에서 불러옵니다.
+
+특히 수요예측 차트는 상세 서랍 안에서만 쓰입니다. 목록의 20개 행을 그리는 데 차트 코드가 필요한 것은 아니므로, 목록 요청과 첫 화면 렌더링 경로에서 제외했습니다. 이 구분은 “기능을 많이 만들었는가”와 별개로 **기능이 실제로 필요한 시점에 코드를 요청하는가**의 문제입니다.
+
+## 4. 썸네일은 위에서 두 장만 우선 요청했다
+
+목록에는 여러 상품 이미지가 있지만 첫 화면에서 바로 보이는 이미지는 일부입니다. `LazyThumbnailImage`는 상위 두 행만 `priority`로 받고, 나머지는 `IntersectionObserver`(요소가 현재 `viewport`, 즉 브라우저에 보이는 영역 근처에 들어왔는지 감지하는 API)로 100px 근처에 들어올 때 렌더링합니다.
+
+```jsx
+<LazyThumbnailImage
+  src={item.imageUrl}
+  width={48}
+  height={48}
+  priority={index < 2}
+/>
+```
+
+우선순위 이미지에는 `loading="eager"`, `fetchPriority="high"`를 사용하고 나머지에는 `loading="lazy"`, `fetchPriority="low"`를 사용합니다. 받은 이미지 URL은 `getImageThumbnailUrl`을 먼저 거치며, Naver 상품 이미지 호스트라면 `type=f100` 축소 변형을 사용합니다. 썸네일 요청이 실패하면 원본 URL로 한 번 더 시도합니다. 알 수 없는 호스트·상대 URL·data URL은 원본을 보존합니다.
+
+이미지 상자에는 항상 가로·세로 크기를 지정했습니다. 이미지가 늦게 도착해도 상자의 자리는 먼저 잡혀야 CLS가 커지지 않기 때문입니다. 실제 구현은 썸네일을 숨기는 대신 같은 크기의 자리와 로딩 표시를 유지합니다.
+
+## 5. 표의 행 높이를 먼저 고정해 CLS를 줄였다
+
+통합재고 표의 데스크톱 셸에는 `table-fixed`를 적용했고, 본문 스켈레톤 행은 실제 행과 같은 `76px` 높이를 사용합니다. 스켈레톤은 데이터가 도착한 뒤 갑자기 다른 높이로 바뀌는 임시 그림이 아니라, 실제 행이 들어갈 자리를 예약하는 장치입니다.
+
+```jsx
+<tr key={i} className="h-[76px]">
+```
+
+데스크톱 표의 실제 행에도 스켈레톤과 같은 `76px` 높이 규칙을 적용하고, 데스크톱 썸네일은 `48px`로 고정했습니다. 모바일 카드의 썸네일은 `56px`이며 행 높이는 콘텐츠에 따라 달라집니다. 따라서 적어도 데스크톱 목록에서는 이미지와 텍스트가 늦게 채워져도 아래 행이 밀리는 폭을 줄일 수 있습니다. 개선 전 통합재고 캡처의 CLS 0.449가 개선 후 0.013으로 내려간 변화는 이처럼 **콘텐츠가 들어오기 전 공간을 확보한 것**과 연결해 읽을 수 있습니다. 다만 단일 코드 변경만의 기여도를 분리 측정한 결과는 아닙니다.
+
+## 6. 실제 자산과 번들도 첫 경로에서 줄였다
+
+화면 코드만 나누고 이미지와 아이콘을 그대로 두면 초기 전송량은 크게 줄지 않습니다. PR에 기록된 자산 변경은 다음과 같습니다.
+
+| 자산 | 변경 전 | 변경 후 |
+| --- | ---: | ---: |
+| 로그인 히어로 이미지 | JPG 516,835 bytes | JPG 50,362 bytes + WebP 35,690 bytes |
+| 사이드바 로고 | PNG 1,546,919 bytes | PNG 24,705 bytes + WebP 2,666 bytes |
+
+로그인 화면과 앱 사이드바의 `<picture>`는 WebP를 우선 사용하고, WebP를 지원하지 않는 브라우저에는 압축한 JPG·PNG를 fallback으로 제공합니다.
+
+빌드 설정에서는 CSS code splitting을 켜고, TanStack Table·TanStack Query 계열을 별도 청크로 분리했습니다. `reicon-react`는 사용하는 아이콘만 개별 파일 import로 바꾸는 Vite 플러그인을 두었습니다. 하나의 전역 아이콘 묶음 때문에 모든 화면이 같은 코드를 받지 않도록 한 것입니다.
+
+또한 사용하지 않게 된 Sentry 모니터링 의존성과 연결 코드는 별도 커밋에서 제거했습니다. 이는 브라우저 첫 화면의 기능을 바꾼 것이 아니라, 더 이상 쓰지 않는 모니터링 코드와 패키지를 번들에서 치운 정리입니다.
+
+## 네트워크 캡처로 “지연”과 “삭제”를 구분했다
+
+이미지 요청 캡처는 이 변경이 무엇을 했는지 잘 보여줍니다.
+
+| 상태 | 캡처에서 확인한 내용 |
+| --- | --- |
+| 개선 전 | 103개 요청, 약 31.4MB 전송 |
+| 개선 후 첫 화면 | 15개 요청, 약 4.2MB 전송, 목록 요청 약 385ms |
+| 스크롤 후 | 총 103개 요청, 약 24.9MB. 두 번째 이미지 묶음은 약 45~50초 시점에 지연 요청 |
+
+<div className="grid grid-cols-1 gap-5 md:grid-cols-3 not-prose my-6">
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/inventory-image-waterfall-before.png" alt="통합재고 이미지 로딩 개선 전 네트워크 워터폴과 103개 요청, 31.4메가바이트 전송 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">개선 전 · 전체 이미지 요청</figcaption>
+  </figure>
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/inventory-image-waterfall-initial-after.png" alt="통합재고 이미지 로딩 개선 후 첫 화면 네트워크 워터폴과 15개 요청, 4.2메가바이트 전송 기록" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">개선 후 · 첫 화면 요청</figcaption>
+  </figure>
+  <figure className="min-w-0">
+    <ZoomableImage src="/images/blog/inventory-image-waterfall-deferred-after.png" alt="통합재고 스크롤 뒤 지연된 이미지 묶음이 추가되는 네트워크 워터폴" className="w-full object-contain" />
+    <figcaption className="mt-2 text-xs text-foreground/60">개선 후 · 스크롤 뒤 지연 요청</figcaption>
+  </figure>
+</div>
+
+첫 화면 캡처만 보면 요청 수가 103개에서 15개로 줄었지만, 스크롤 후에도 필요한 이미지가 다시 요청됩니다. 다시 말해 이미지가 사라진 것이 아니라 **처음 필요한 요청과 나중에 필요한 요청을 분리한 것**입니다.
+
+개선 후 초기 캡처에는 Sentry 호출 두 건도 남아 있습니다. 이는 현재 소스에서 Sentry를 제거한 커밋보다 앞선 중간 캡처로 분류했습니다. 따라서 이 글의 최종 코드 상태와 해당 네트워크 캡처를 같은 시점의 완성본이라고 표현하지 않습니다.
+
+## 결과를 이렇게 해석한다
+
+제공된 Lighthouse 캡처와 코드 diff를 함께 보면 다음 범위까지 말할 수 있습니다.
+
+- 대시보드 성능 점수는 47에서 99로, 통합재고는 35에서 99로 기록됐습니다.
+- 통합재고 FCP는 9.7초에서 0.6초, LCP는 19.4초에서 0.8초로 기록됐습니다.
+- 통합재고 CLS는 0.449에서 0.013으로 기록됐습니다.
+- 첫 화면의 라우트·3D·상세 모달·차트·이미지 요청을 사용 시점에 맞춰 늦췄습니다.
+- 이미지와 스켈레톤의 크기를 고정해 늦게 도착한 콘텐츠가 레이아웃을 밀 가능성을 줄였습니다.
+
+이 결과를 “모든 환경에서 Lighthouse 99점”으로 확장하지는 않습니다. 캡처는 반복 평균이 아니고, 실제 사용자 환경의 네트워크·기기·캐시·화면 크기는 다릅니다. PR 기록에도 audit·E2E·Storybook을 실행하지 않은 항목과 600KB 초과 청크 및 Lottie(애니메이션 실행에 필요한 계산) 관련 경고가 남아 있습니다.
+
+## 남은 과제
+
+이번 작업은 초기 렌더링 경로를 정리했지만 모든 성능 문제가 끝난 것은 아닙니다.
+
+- Lighthouse 반복 측정과 실제 사용자 환경의 RUM(Real User Monitoring)이 없습니다.
+- 스크롤 이후 이미지 전송량은 여전히 약 24.9MB로 기록됐습니다.
+- 600KB를 넘는 청크와 Lottie 평가 경고가 남아 있습니다.
+- 백엔드 응답 시간과 브라우저 렌더링 시간을 같은 실험에서 분리해 측정하지 않았습니다.
+- PR #91의 audit·E2E·Storybook 검증은 당시 실행되지 않았습니다.
+
+다음 개선에서는 첫 화면 이후의 이미지 총량, 큰 청크의 실제 사용 지점, 기기별 LCP를 따로 측정해야 합니다. 지금 확인한 결론은 **필요하지 않은 일을 첫 화면과 동시에 시키지 않도록 경계를 나눴고, 제공된 캡처에서 첫 콘텐츠와 주요 콘텐츠가 더 이른 시점에 나타났다**는 데 있습니다.
+
+## 마무리
+
+이번 작업의 흐름을 통합재고 동기화 글과 이어서 읽으면 다음과 같습니다.
+
+1. [통합재고 동기화 흐름](/blog/integrated-inventory-sync-flow)에서 원천 데이터 정규화부터 canonical 반영, 위험 판정, 스냅샷 준비까지의 서버 실행 경계를 확인합니다.
+2. 이번 글에서는 그 결과를 읽는 브라우저가 첫 화면에 필요하지 않은 코드·3D·이미지·상세 기능까지 동시에 준비하지 않도록 렌더링 경로를 다시 나눴습니다.
+
+조회 SQL을 빠르게 만드는 일과 첫 화면을 빠르게 보이는 일은 서로 다른 병목입니다. 서버가 줄여 준 응답을 브라우저가 다시 무거운 자원으로 기다리게 하지 않으려면, **데이터의 범위와 자원의 시점을 함께 설계해야 합니다.**
+
+← [통합재고 동기화 흐름: 원천 데이터부터 화면까지](/blog/integrated-inventory-sync-flow)
+
+## 근거 자료
+
+- [Frontend PR #74 · 운영 UI·성능·요청 취소 처리](https://github.com/kosa11-final-project/FrontEnd/pull/74)
+- [Frontend PR #91 · 대시보드·통합재고 초기 로딩과 반응형 최적화](https://github.com/kosa11-final-project/FrontEnd/pull/91)
+- [Sentry 모니터링 의존성 제거 커밋](https://github.com/kosa11-final-project/FrontEnd/commit/ffdde64)
